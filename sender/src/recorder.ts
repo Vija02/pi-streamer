@@ -152,7 +152,7 @@ export async function startRecording(): Promise<void> {
 
     // Connect JACK ports on first segment (FFmpeg needs to be running first)
     if (!jackConnected) {
-      await Bun.sleep(1000);
+      await Bun.sleep(3000);
       await connectJackPorts();
       jackConnected = true;
     }
