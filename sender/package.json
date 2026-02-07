@@ -1,0 +1,20 @@
+{
+  "name": "xr18-stream-sender",
+  "version": "1.0.0",
+  "description": "Captures 18-channel audio from XR18 via JACK and streams to server",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch run src/index.ts",
+    "test-jack": "bun run src/index.ts test",
+    "upload-pending": "bun run src/index.ts upload-pending"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.0",
+    "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "pino": "^10.3.0",
+    "pino-pretty": "^13.1.3"
+  }
+}
