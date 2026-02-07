@@ -63,38 +63,13 @@ export async function checkJackSetup(): Promise<JackCheckResult> {
 }
 
 /**
- * Connect JACK ports for the configured channels
+ * Get source ports matching the configured prefix
+ * (used by jack_capture to know which ports to record)
  */
-export async function connectJackPorts(): Promise<void> {
+export async function getSourcePorts(): Promise<string[]> {
   const config = getConfig();
-
-  logger.info("Connecting JACK ports...");
-
-  // First, list all available ports to find FFmpeg's input ports
   const allPorts = await jackLsp();
-  const ffmpegPorts = allPorts.filter((p) => p.startsWith(config.jackClientName + ":"));
-  
-  if (ffmpegPorts.length === 0) {
-    logger.error({ clientName: config.jackClientName, allPorts }, "No FFmpeg JACK ports found");
-    return;
-  }
-  
-  logger.info({ ffmpegPorts }, "Found FFmpeg JACK ports");
-
-  for (let i = 1; i <= config.channels; i++) {
-    const srcPort = `${config.jackPortPrefix}${i}`;
-    // FFmpeg JACK ports are typically named "clientname:input_N" where N is 1-indexed
-    const dstPort = ffmpegPorts[i - 1] || `${config.jackClientName}:input_${i}`;
-
-    const result = await jackConnect(srcPort, dstPort);
-    if (result.ok) {
-      logger.debug({ src: srcPort, dst: dstPort }, "Connected port");
-    } else {
-      logger.warn({ src: srcPort, dst: dstPort, error: result.error }, "Could not connect port");
-    }
-  }
-
-  logger.info({ channels: config.channels }, "JACK ports connection complete");
+  return allPorts.filter((p) => p.startsWith(config.jackPortPrefix));
 }
 
 /**

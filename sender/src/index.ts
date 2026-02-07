@@ -1,7 +1,7 @@
 /**
  * XR18 JACK Audio Sender Service
  *
- * A recording service that captures 18 channels from XR18 via JACK using FFmpeg.
+ * A recording service that captures 18 channels from XR18 via JACK using jack_capture.
  * 
  * Features:
  * - Records locally as segments (primary - always works)
@@ -15,7 +15,7 @@
  *
  * Requirements:
  * - JACK audio server running with XR18 connected
- * - FFmpeg with JACK support
+ * - jack_capture installed (supports unlimited channels, unlike FFmpeg's 8-channel limit)
  *
  * To stop gracefully, either:
  * - Send SIGINT (Ctrl+C) or SIGTERM
@@ -35,9 +35,8 @@ import { uploadPending } from "./upload";
 async function checkDependencies(): Promise<string[]> {
   const missing: string[] = [];
 
-  if (!(await commandExists("ffmpeg"))) missing.push("ffmpeg");
+  if (!(await commandExists("jack_capture"))) missing.push("jack_capture");
   if (!(await commandExists("jack_lsp"))) missing.push("jack (jack_lsp)");
-  if (!(await commandExists("jack_connect"))) missing.push("jack (jack_connect)");
 
   return missing;
 }
@@ -50,7 +49,7 @@ async function testJack(): Promise<void> {
 
   const missing = await checkDependencies();
   if (missing.length > 0) {
-    logger.fatal({ missing }, "Missing dependencies. Install with: sudo apt install ffmpeg jackd2");
+    logger.fatal({ missing }, "Missing dependencies. Install with: sudo apt install jack-capture jackd2");
     process.exit(1);
   }
 
@@ -120,7 +119,7 @@ Environment variables:
   // Check dependencies
   const missing = await checkDependencies();
   if (missing.length > 0) {
-    logger.fatal({ missing }, "Missing dependencies. Install with: sudo apt install ffmpeg jackd2");
+    logger.fatal({ missing }, "Missing dependencies. Install with: sudo apt install jack-capture jackd2");
     process.exit(1);
   }
 

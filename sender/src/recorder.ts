@@ -1,182 +1,224 @@
 /**
- * FFmpeg recording functionality
+ * jack_capture recording functionality
+ *
+ * Uses jack_capture instead of FFmpeg because FFmpeg JACK input
+ * only supports up to 8 channels, while XR18 has 18 channels.
  */
-import { $ } from "bun";
-import { join } from "path";
-import { getConfig } from "./config";
-import { recordingLogger as logger } from "./logger";
-import { formatTimestamp } from "./utils";
-import { checkJackSetup, connectJackPorts } from "./jack";
-import { queueUpload, waitForQueueEmpty, getQueueLength } from "./upload";
+import { $ } from "bun"
+import { join } from "path"
+import { getConfig } from "./config"
+import { recordingLogger as logger } from "./logger"
+import { formatTimestamp } from "./utils"
+import { checkJackSetup, getSourcePorts } from "./jack"
+import { queueUpload, waitForQueueEmpty, getQueueLength } from "./upload"
 
 /**
- * Record a single segment using FFmpeg
+ * Record a single segment using jack_capture
  */
 async function recordSegment(outputPath: string): Promise<boolean> {
-  const config = getConfig();
-  const { channels, jackClientName, sampleRate, segmentDuration } = config;
+	const config = getConfig()
+	const { channels, segmentDuration, jackPortPrefix } = config
 
-  try {
-    await $`ffmpeg -y \
-      -f jack \
-      -channels ${channels} \
-      -i ${jackClientName} \
-      -ar ${sampleRate} \
-      -t ${segmentDuration} \
-      -c:a flac \
-      -compression_level 0 \
-      ${outputPath}`.quiet();
-    return true;
-  } catch {
-    // FFmpeg may return non-zero on timeout, but file could still be valid
-    return await Bun.file(outputPath).exists();
-  }
+	// Build port arguments for jack_capture
+	// jack_capture uses -p for each port to capture
+	const portArgs: string[] = []
+	for (let i = 1; i <= channels; i++) {
+		portArgs.push("-p", `${jackPortPrefix}${i}`)
+	}
+
+	try {
+		// jack_capture options:
+		// -d <duration> : recording duration in seconds
+		// -f <format>   : output format (flac, wav, etc.)
+		// -b <bits>     : bit depth
+		// -p <port>     : port to capture (repeat for each port)
+		// -fn <file>    : output filename
+		await $`jack_capture \
+      -d ${segmentDuration} \
+      -f flac \
+      -b 24 \
+      ${portArgs} \
+      -fn ${outputPath}`.quiet()
+		return true
+	} catch (err: any) {
+		const stderr = err?.stderr?.toString?.() || ""
+		// jack_capture may exit with error but still produce valid file
+		if (await Bun.file(outputPath).exists()) {
+			logger.warn(
+				{ stderr: stderr.trim() },
+				"jack_capture exited with error but file exists",
+			)
+			return true
+		}
+		logger.error({ error: stderr.trim() }, "jack_capture failed")
+		return false
+	}
 }
 
 export interface RecorderState {
-  isRunning: boolean;
-  segmentCount: number;
-  sessionDir: string;
+	isRunning: boolean
+	segmentCount: number
+	sessionDir: string
 }
 
 let state: RecorderState = {
-  isRunning: false,
-  segmentCount: 0,
-  sessionDir: "",
-};
+	isRunning: false,
+	segmentCount: 0,
+	sessionDir: "",
+}
 
 /**
  * Check if the finish trigger file exists
  */
 async function checkFinishTrigger(): Promise<boolean> {
-  const config = getConfig();
-  return await Bun.file(config.finishTriggerPath).exists();
+	const config = getConfig()
+	return await Bun.file(config.finishTriggerPath).exists()
 }
 
 /**
  * Remove the finish trigger file
  */
 async function clearFinishTrigger(): Promise<void> {
-  const config = getConfig();
-  try {
-    await $`rm -f ${config.finishTriggerPath}`.quiet();
-  } catch {
-    // Ignore errors
-  }
+	const config = getConfig()
+	try {
+		await $`rm -f ${config.finishTriggerPath}`.quiet()
+	} catch {
+		// Ignore errors
+	}
 }
 
 /**
  * Stop the recording loop
  */
 export function stopRecording(): void {
-  state.isRunning = false;
+	state.isRunning = false
 }
 
 /**
  * Get the current recorder state
  */
 export function getRecorderState(): RecorderState {
-  return { ...state };
+	return { ...state }
 }
 
 /**
  * Main recording loop - runs until stopped
  */
 export async function startRecording(): Promise<void> {
-  const config = getConfig();
+	const config = getConfig()
 
-  logger.info({ sessionId: config.sessionId }, "Starting recording service");
+	logger.info({ sessionId: config.sessionId }, "Starting recording service")
 
-  // Clear any existing finish trigger
-  await clearFinishTrigger();
+	// Clear any existing finish trigger
+	await clearFinishTrigger()
 
-  // Check JACK setup
-  const jackCheck = await checkJackSetup();
-  if (!jackCheck.ok) {
-    logger.fatal("JACK server is not running. Start JACK first.");
-    process.exit(1);
-  }
+	// Check JACK setup
+	const jackCheck = await checkJackSetup()
+	if (!jackCheck.ok) {
+		logger.fatal("JACK server is not running. Start JACK first.")
+		process.exit(1)
+	}
 
-  // Create session directory
-  const sessionDir = join(config.recordingDir, config.sessionId);
-  await $`mkdir -p ${sessionDir}`;
-  state.sessionDir = sessionDir;
+	// Verify source ports exist
+	const sourcePorts = await getSourcePorts()
+	if (sourcePorts.length < config.channels) {
+		logger.warn(
+			{
+				found: sourcePorts.length,
+				expected: config.channels,
+				ports: sourcePorts,
+			},
+			"Found fewer source ports than configured channels",
+		)
+	}
 
-  logger.info({
-    channels: config.channels,
-    sampleRate: config.sampleRate,
-    segmentDuration: config.segmentDuration,
-    recordingDir: sessionDir,
-    uploadEnabled: config.uploadEnabled,
-    streamUrl: config.uploadEnabled ? config.streamUrl : undefined,
-    finishTrigger: config.finishTriggerPath,
-  }, "Configuration loaded");
+	// Create session directory
+	const sessionDir = join(config.recordingDir, config.sessionId)
+	await $`mkdir -p ${sessionDir}`
+	state.sessionDir = sessionDir
 
-  let segmentNumber = 0;
-  let jackConnected = false;
-  state.isRunning = true;
+	logger.info(
+		{
+			channels: config.channels,
+			sampleRate: config.sampleRate,
+			segmentDuration: config.segmentDuration,
+			recordingDir: sessionDir,
+			uploadEnabled: config.uploadEnabled,
+			streamUrl: config.uploadEnabled ? config.streamUrl : undefined,
+			finishTrigger: config.finishTriggerPath,
+			jackPortPrefix: config.jackPortPrefix,
+		},
+		"Configuration loaded",
+	)
 
-  // Handle graceful shutdown
-  const shutdown = () => {
-    logger.info("Shutdown signal received");
-    state.isRunning = false;
-  };
+	let segmentNumber = 0
+	state.isRunning = true
 
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+	// Handle graceful shutdown
+	const shutdown = () => {
+		logger.info("Shutdown signal received")
+		state.isRunning = false
+	}
 
-  logger.info("Recording loop started. Touch finish trigger file to stop gracefully.");
+	process.on("SIGINT", shutdown)
+	process.on("SIGTERM", shutdown)
 
-  while (state.isRunning) {
-    // Check for finish trigger
-    if (await checkFinishTrigger()) {
-      logger.info("Finish trigger detected, stopping after current segment");
-      state.isRunning = false;
-      await clearFinishTrigger();
-      // Continue to finish current segment
-    }
+	logger.info(
+		"Recording loop started. Touch finish trigger file to stop gracefully.",
+	)
 
-    const timestamp = formatTimestamp(new Date());
-    const segmentFile = join(
-      sessionDir,
-      `seg_${String(segmentNumber).padStart(5, "0")}_${timestamp}.${config.recordingFormat}`
-    );
+	while (state.isRunning) {
+		// Check for finish trigger
+		if (await checkFinishTrigger()) {
+			logger.info("Finish trigger detected, stopping after current segment")
+			state.isRunning = false
+			await clearFinishTrigger()
+			// Continue to finish current segment
+		}
 
-    logger.info(
-      { segment: segmentNumber, file: segmentFile.split("/").pop() },
-      "Recording segment"
-    );
+		const timestamp = formatTimestamp(new Date())
+		const segmentFile = join(
+			sessionDir,
+			`seg_${String(segmentNumber).padStart(5, "0")}_${timestamp}.${config.recordingFormat}`,
+		)
 
-    // Start FFmpeg recording
-    const recordPromise = recordSegment(segmentFile);
+		logger.info(
+			{ segment: segmentNumber, file: segmentFile.split("/").pop() },
+			"Recording segment",
+		)
 
-    // Connect JACK ports on first segment (FFmpeg needs to be running first)
-    if (!jackConnected) {
-      await Bun.sleep(3000);
-      await connectJackPorts();
-      jackConnected = true;
-    }
+		// Record segment using jack_capture
+		const success = await recordSegment(segmentFile)
 
-    // Wait for segment to complete
-    await recordPromise;
+		if (!success) {
+			logger.error(
+				{ segment: segmentNumber },
+				"Failed to record segment, retrying...",
+			)
+			await Bun.sleep(1000)
+			continue
+		}
 
-    // Queue for upload if enabled
-    if (config.uploadEnabled && (await Bun.file(segmentFile).exists())) {
-      queueUpload(segmentFile, segmentNumber);
-    }
+		// Queue for upload if enabled
+		if (config.uploadEnabled && (await Bun.file(segmentFile).exists())) {
+			queueUpload(segmentFile, segmentNumber)
+		}
 
-    segmentNumber++;
-    state.segmentCount = segmentNumber;
-  }
+		segmentNumber++
+		state.segmentCount = segmentNumber
+	}
 
-  logger.info({ segments: segmentNumber }, "Recording stopped");
+	logger.info({ segments: segmentNumber }, "Recording stopped")
 
-  // Wait for upload queue to finish
-  const pendingUploads = getQueueLength();
-  if (pendingUploads > 0) {
-    logger.info({ pending: pendingUploads }, "Waiting for pending uploads to complete");
-    await waitForQueueEmpty();
-  }
+	// Wait for upload queue to finish
+	const pendingUploads = getQueueLength()
+	if (pendingUploads > 0) {
+		logger.info(
+			{ pending: pendingUploads },
+			"Waiting for pending uploads to complete",
+		)
+		await waitForQueueEmpty()
+	}
 
-  logger.info("Recording service finished");
+	logger.info("Recording service finished")
 }

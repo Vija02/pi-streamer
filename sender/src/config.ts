@@ -14,7 +14,6 @@ export interface Config {
   // Audio settings
   sampleRate: number;
   channels: number;
-  jackClientName: string;
 
   // JACK port prefix (adjust based on your JACK setup)
   jackPortPrefix: string;
@@ -46,7 +45,6 @@ export function loadConfig(): Config {
     // Audio settings
     sampleRate: Number(process.env.SAMPLE_RATE) || 48000,
     channels: Number(process.env.CHANNELS) || 18,
-    jackClientName: process.env.JACK_CLIENT_NAME || "xr18_streamer",
 
     // JACK port prefix
     jackPortPrefix: process.env.JACK_PORT_PREFIX || "system:capture_",
