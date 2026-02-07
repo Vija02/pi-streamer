@@ -225,5 +225,43 @@ export async function startRecording(): Promise<void> {
 		await waitForQueueEmpty()
 	}
 
+	// Notify receiver that session is complete
+	if (config.uploadEnabled) {
+		await notifySessionComplete(config.sessionId, config.streamUrl)
+	}
+
 	logger.info("Recording service finished")
+}
+
+/**
+ * Notify the receiver that a session is complete
+ */
+async function notifySessionComplete(sessionId: string, streamUrl: string): Promise<void> {
+	// Derive the session complete URL from the stream URL
+	const baseUrl = streamUrl.replace(/\/stream$/, "")
+	const completeUrl = `${baseUrl}/session/complete`
+
+	logger.info({ sessionId, url: completeUrl }, "Notifying receiver of session completion")
+
+	try {
+		const response = await fetch(completeUrl, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({ sessionId }),
+		})
+
+		if (response.ok) {
+			const result = await response.json()
+			logger.info({ result }, "Receiver acknowledged session completion")
+		} else {
+			logger.warn(
+				{ status: response.status },
+				"Failed to notify receiver of session completion"
+			)
+		}
+	} catch (err) {
+		logger.warn({ err }, "Could not notify receiver of session completion (receiver may be offline)")
+	}
 }
