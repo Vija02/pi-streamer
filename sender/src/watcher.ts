@@ -166,7 +166,7 @@ export async function stopWatcher(): Promise<void> {
 	}
 
 	// Wait a moment for any final file writes to complete
-	await Bun.sleep(500)
+	await Bun.sleep(1000)
 
 	// Do a final scan and queue ALL remaining files (including the last one)
 	const finalFiles = await getWavFiles(state.sessionDir)

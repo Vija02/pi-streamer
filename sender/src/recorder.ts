@@ -85,6 +85,7 @@ function buildJackCaptureArgs(sessionDir: string): string[] {
 		"-b", "24",            // Bit depth
 		"-Rf", String(rotateFrames), // Rotate file every N frames
 		"-fn", filenamePrefix, // Filename prefix
+		"--no-stdin",          // Don't read from stdin (prevents immediate exit)
 	]
 
 	// Add port arguments for each channel
@@ -204,6 +205,9 @@ export async function startRecording(): Promise<void> {
 
 	state.isRunning = false
 	state.process = null
+
+	// Give filesystem a moment to sync after jack_capture exits
+	await Bun.sleep(500)
 
 	// Stop the file watcher and process any remaining files
 	if (config.uploadEnabled) {
