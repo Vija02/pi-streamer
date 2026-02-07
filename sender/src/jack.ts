@@ -20,12 +20,13 @@ export async function jackLsp(): Promise<string[]> {
 /**
  * Connect two JACK ports
  */
-export async function jackConnect(src: string, dst: string): Promise<boolean> {
+export async function jackConnect(src: string, dst: string): Promise<{ ok: boolean; error?: string }> {
   try {
     await $`jack_connect ${src} ${dst}`.quiet();
-    return true;
-  } catch {
-    return false;
+    return { ok: true };
+  } catch (err: any) {
+    const stderr = err?.stderr?.toString?.() || err?.message || String(err);
+    return { ok: false, error: stderr.trim() };
   }
 }
 
@@ -69,18 +70,31 @@ export async function connectJackPorts(): Promise<void> {
 
   logger.info("Connecting JACK ports...");
 
+  // First, list all available ports to find FFmpeg's input ports
+  const allPorts = await jackLsp();
+  const ffmpegPorts = allPorts.filter((p) => p.startsWith(config.jackClientName + ":"));
+  
+  if (ffmpegPorts.length === 0) {
+    logger.error({ clientName: config.jackClientName, allPorts }, "No FFmpeg JACK ports found");
+    return;
+  }
+  
+  logger.info({ ffmpegPorts }, "Found FFmpeg JACK ports");
+
   for (let i = 1; i <= config.channels; i++) {
     const srcPort = `${config.jackPortPrefix}${i}`;
-    const dstPort = `${config.jackClientName}:input_${i}`;
+    // FFmpeg JACK ports are typically named "clientname:input_N" where N is 1-indexed
+    const dstPort = ffmpegPorts[i - 1] || `${config.jackClientName}:input_${i}`;
 
-    if (await jackConnect(srcPort, dstPort)) {
+    const result = await jackConnect(srcPort, dstPort);
+    if (result.ok) {
       logger.debug({ src: srcPort, dst: dstPort }, "Connected port");
     } else {
-      logger.warn({ src: srcPort }, "Could not connect port");
+      logger.warn({ src: srcPort, dst: dstPort, error: result.error }, "Could not connect port");
     }
   }
 
-  logger.info({ channels: config.channels }, "JACK ports connected");
+  logger.info({ channels: config.channels }, "JACK ports connection complete");
 }
 
 /**
