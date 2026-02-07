@@ -142,3 +142,12 @@ dist
 .svelte-kit
 
 # End of https://www.toptal.com/developers/gitignore/api/node
+
+# SQLite database
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Received audio files
+received/
