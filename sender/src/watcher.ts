@@ -1,13 +1,13 @@
 /**
  * File watcher for completed recording segments
  *
- * Monitors the session directory for new .wav files created by jack_capture.
+ * Monitors the session directory for new .flac files created by jack_capture.
  * When a new file appears, it means the previous file is complete and can be
  * uploaded.
  *
  * Logic:
- * - jack_capture creates files like: jack_capture_001.wav, jack_capture_002.wav, etc.
- * - When jack_capture_002.wav appears, jack_capture_001.wav is complete
+ * - jack_capture creates files like: jack_capture_001.flac, jack_capture_002.flac, etc.
+ * - When jack_capture_002.flac appears, jack_capture_001.flac is complete
  * - We queue the completed file for upload
  * - On shutdown, we queue the final (current) file
  */
@@ -40,10 +40,10 @@ const POLL_INTERVAL_MS = 5000
 
 /**
  * Extract segment number from jack_capture filename
- * e.g., "jack_capture.00.wav" -> 0, "jack_capture.01.wav" -> 1
+ * e.g., "jack_capture.00.flac" -> 0, "jack_capture.01.flac" -> 1
  */
 function extractSegmentNumber(filename: string): number {
-	const match = filename.match(/jack_capture\.(\d+)\.wav$/)
+	const match = filename.match(/jack_capture\.(\d+)\.flac$/)
 	if (match) {
 		return parseInt(match[1], 10)
 	}
@@ -51,13 +51,13 @@ function extractSegmentNumber(filename: string): number {
 }
 
 /**
- * Get all wav files in the session directory, sorted by segment number
+ * Get all flac files in the session directory, sorted by segment number
  */
-async function getWavFiles(dir: string): Promise<string[]> {
+async function getFlacFiles(dir: string): Promise<string[]> {
 	try {
 		const files = await readdir(dir)
 		return files
-			.filter((f) => f.endsWith(".wav") && f.startsWith("jack_capture."))
+			.filter((f) => f.endsWith(".flac") && f.startsWith("jack_capture."))
 			.sort((a, b) => extractSegmentNumber(a) - extractSegmentNumber(b))
 	} catch {
 		return []
@@ -89,7 +89,7 @@ function queueFileForUpload(filename: string): void {
  * Process new files - queue completed segments for upload
  */
 async function processNewFiles(): Promise<void> {
-	const currentFiles = await getWavFiles(state.sessionDir)
+	const currentFiles = await getFlacFiles(state.sessionDir)
 
 	for (const file of currentFiles) {
 		if (!state.seenFiles.has(file)) {
@@ -116,7 +116,7 @@ async function processNewFiles(): Promise<void> {
 function handleFsEvent(eventType: string, filename: string | null): void {
 	if (!state.isRunning) return
 	if (!filename) return
-	if (!filename.endsWith(".wav")) return
+	if (!filename.endsWith(".flac")) return
 	if (!filename.startsWith("jack_capture.")) return
 
 	logger.debug({ eventType, filename }, "File system event")
@@ -190,7 +190,7 @@ export async function stopWatcher(): Promise<void> {
 	await Bun.sleep(1000)
 
 	// Do a final scan and queue ALL remaining files (including the last one)
-	const finalFiles = await getWavFiles(state.sessionDir)
+	const finalFiles = await getFlacFiles(state.sessionDir)
 
 	for (const file of finalFiles) {
 		state.seenFiles.add(file)

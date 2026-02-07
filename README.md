@@ -16,11 +16,12 @@ Both sender and receiver prioritize local storage first, then upload in the back
 ```
 ┌─────────────┐     JACK      ┌──────────────┐     HTTP POST     ┌──────────────┐
 │    XR18     │ ───────────── │    Sender    │ ────────────────> │   Receiver   │
-│  (USB/Net)  │               │  (FFmpeg)    │  (per segment)    │  (Bun/Node)  │
+│  (USB/Net)  │               │(jack_capture)│  (per segment)    │  (Bun/Node)  │
 └─────────────┘               └──────────────┘                   └──────────────┘
                                     │                                   │
                                     │ 1. Save                           │ 1. Save
                                     │    locally                        │    locally
+                                    │    (FLAC)                         │
                                     │                                   │
                                     │ 2. Upload                         │ 2. Queue for
                                     │    segment                        │    S3 upload
@@ -37,20 +38,28 @@ Both sender and receiver prioritize local storage first, then upload in the back
                                     └──────── Both have local copies ───┘
 ```
 
+## Features
+
+- **Gapless recording**: Uses `jack_capture` with `--rotatefile` for seamless segment rotation
+- **18 channels**: Unlike FFmpeg (limited to 8 JACK channels), `jack_capture` supports unlimited channels
+- **FLAC compression**: Lossless compression reduces file sizes significantly, especially for silent/unused channels
+- **Fault tolerant**: Local recording always works, uploads happen in background with retries
+- **Graceful shutdown**: Stop via SIGINT, SIGTERM, or touch a trigger file
+
 ## Requirements
 
 ### Sender (Linux machine with XR18)
 
 - Bun runtime
 - JACK audio server (`jackd2`)
-- FFmpeg with JACK support
+- `jack_capture` (supports unlimited channels)
 
 ```bash
 # Ubuntu/Debian
-sudo apt install jackd2 ffmpeg
+sudo apt install jackd2 jack-capture
 
 # Arch
-sudo pacman -S jack2 ffmpeg
+sudo pacman -S jack2 jack_capture
 
 # Install Bun
 curl -fsSL https://bun.sh/install | bash
@@ -97,13 +106,13 @@ jack_lsp
 ### 4. Configure & Run Sender
 
 ```bash
-cd streaming/sender
+cd sender
 
 # Install dependencies
 bun install
 
 # Test JACK setup first
-bun run index.ts test
+bun run src/index.ts test
 
 # Configure (adjust JACK_PORT_PREFIX if needed)
 export STREAM_URL="http://your-server:3000/stream"
@@ -113,13 +122,13 @@ export JACK_PORT_PREFIX="system:capture_"
 bun run start
 
 # Retry any failed uploads
-bun run index.ts upload-pending
+bun run src/index.ts upload-pending
 ```
 
 ### 5. Setup Receiver
 
 ```bash
-cd streaming/receiver
+cd receiver
 
 # Install dependencies
 bun install
@@ -138,17 +147,21 @@ bun run start
 
 ### Sender Environment Variables
 
-| Variable             | Default                        | Description               |
-| -------------------- | ------------------------------ | ------------------------- |
-| `STREAM_URL`         | `http://localhost:3000/stream` | Receiver endpoint         |
-| `RECORDING_DIR`      | `./recordings`                 | Local recording directory |
-| `SAMPLE_RATE`        | `48000`                        | Audio sample rate         |
-| `CHANNELS`           | `18`                           | Number of channels        |
-| `JACK_PORT_PREFIX`   | `system:capture_`              | JACK port prefix          |
-| `SESSION_ID`         | (timestamp)                    | Unique session ID         |
-| `SEGMENT_DURATION`   | `30`                           | Segment length in seconds |
-| `UPLOAD_ENABLED`     | `true`                         | Enable server upload      |
-| `UPLOAD_RETRY_COUNT` | `3`                            | Upload retry attempts     |
+| Variable              | Default                        | Description                                  |
+| --------------------- | ------------------------------ | -------------------------------------------- |
+| `STREAM_URL`          | `http://localhost:3000/stream` | Receiver endpoint                            |
+| `RECORDING_DIR`       | `./recordings`                 | Local recording directory                    |
+| `SAMPLE_RATE`         | `48000`                        | Audio sample rate                            |
+| `CHANNELS`            | `18`                           | Number of channels                           |
+| `JACK_PORT_PREFIX`    | `system:capture_`              | JACK port prefix                             |
+| `SESSION_ID`          | (timestamp)                    | Unique session ID                            |
+| `SEGMENT_DURATION`    | `30`                           | Segment length in seconds                    |
+| `UPLOAD_ENABLED`      | `true`                         | Enable server upload                         |
+| `UPLOAD_RETRY_COUNT`  | `3`                            | Upload retry attempts                        |
+| `UPLOAD_RETRY_DELAY`  | `5000`                         | Delay between retries (ms)                   |
+| `FINISH_TRIGGER_PATH` | `/tmp/xr18-finish`             | Touch this file to stop recording gracefully |
+| `LOG_LEVEL`           | `info`                         | Logging level: trace, debug, info, warn, error |
+| `NODE_ENV`            | -                              | Set to "production" for JSON logging         |
 
 ### Receiver Environment Variables
 
@@ -167,15 +180,34 @@ bun run start
 | `UPLOAD_MAX_RETRIES`    | `5`                 | Max upload retry attempts          |
 | `UPLOAD_CONCURRENCY`    | `2`                 | Concurrent S3 uploads              |
 
+## File Formats & Sizes
+
+### FLAC Compression
+
+The sender records in FLAC format (lossless compression). This significantly reduces file sizes:
+
+| Scenario                          | WAV Size | FLAC Size | Savings |
+| --------------------------------- | -------- | --------- | ------- |
+| All 18 channels active (loud)     | ~74 MB   | ~35-50 MB | 30-50%  |
+| Some channels silent              | ~74 MB   | ~10-30 MB | 60-85%  |
+| Mostly silent (few active channels) | ~74 MB | ~1-5 MB   | 93-98%  |
+
+Silent channels compress to almost nothing, making FLAC ideal for multi-channel recording where not all inputs are used.
+
+### File Naming
+
+- **Sender**: `./recordings/{session_id}/jack_capture.00.flac`, `jack_capture.01.flac`, ...
+- **Receiver local**: `./received/{session_id}/{timestamp}_seg00001.flac`
+- **S3**: `recordings/{session_id}/{timestamp}_seg00001.flac`
+
 ## API Endpoints
 
 ### POST /stream
 
-Upload audio data.
+Upload audio segment.
 
 Headers:
-
-- `Content-Type: audio/flac`
+- `Content-Type: audio/flac` (or `audio/wav`)
 - `X-Session-ID: your-session-id`
 - `X-Sample-Rate: 48000`
 - `X-Channels: 18`
@@ -183,7 +215,24 @@ Headers:
 
 ### GET /health
 
-Health check.
+Health check and queue status.
+
+```json
+{
+  "status": "ok",
+  "timestamp": "2024-01-15T10:30:00.000Z",
+  "config": {
+    "s3Enabled": true,
+    "s3Bucket": "my-bucket",
+    "localStorageDir": "./received"
+  },
+  "uploadQueue": {
+    "pending": 0,
+    "activeUploads": 0,
+    "running": false
+  }
+}
+```
 
 ### GET /sessions
 
@@ -205,12 +254,34 @@ S3_BUCKET=your-bucket-name
 AWS_REGION=auto
 ```
 
+## Stopping Recording
+
+There are three ways to stop recording gracefully:
+
+1. **SIGINT**: Press `Ctrl+C`
+2. **SIGTERM**: Send kill signal (`kill <pid>`)
+3. **Trigger file**: Touch the finish trigger file
+
+```bash
+# Using trigger file (default path)
+touch /tmp/xr18-finish
+
+# Custom path via FINISH_TRIGGER_PATH
+FINISH_TRIGGER_PATH=/home/pi/stop-recording touch /home/pi/stop-recording
+```
+
+The sender will:
+1. Stop `jack_capture` gracefully
+2. Wait for the final segment to be written
+3. Upload any remaining segments
+4. Exit cleanly
+
 ## Syncing with Video
 
 The recordings include timestamps in the filename. To sync with separately recorded video:
 
 1. **Use timecode**: Start both recordings at a known time (clap, slate)
-2. **Match timestamps**: Filename includes `YYYYMMDD_HHMMSS`
+2. **Match timestamps**: Filename includes ISO timestamp
 3. **In your DAW/NLE**: Align using the audio waveform from a reference mic
 
 For frame-accurate sync, consider:
@@ -227,6 +298,14 @@ Start JACK first:
 
 ```bash
 jackd -d alsa -d hw:XR18 -r 48000
+```
+
+### "Missing dependencies"
+
+Install jack_capture:
+
+```bash
+sudo apt install jack-capture jackd2
 ```
 
 ### "Could not connect port"
@@ -247,7 +326,38 @@ Then set `JACK_PORT_PREFIX` to match.
 
 ### Large file uploads timing out
 
-The receiver uses multipart upload for files > 5MB. If uploads still fail:
+If uploads still fail:
 
 - Increase server timeout
-- Use shorter `SEGMENT_DURATION` on the sender
+- Use shorter `SEGMENT_DURATION` on the sender (e.g., 15 seconds)
+- Check network connectivity
+
+### Files not being detected for upload
+
+Ensure the watcher is running. Check logs for:
+```
+Started watching for segment files
+```
+
+The watcher looks for files matching `jack_capture.XX.flac` pattern.
+
+## Project Structure
+
+```
+pi-streamer/
+├── sender/                 # Runs on device with XR18
+│   └── src/
+│       ├── index.ts       # Main entry point
+│       ├── recorder.ts    # jack_capture recording logic
+│       ├── watcher.ts     # File watcher for completed segments
+│       ├── upload.ts      # Upload queue management
+│       ├── jack.ts        # JACK utilities
+│       ├── config.ts      # Configuration
+│       ├── logger.ts      # Logging (pino)
+│       └── utils.ts       # Utility functions
+│
+├── receiver/               # Runs on server
+│   └── server.ts          # HTTP server + S3 upload queue
+│
+└── README.md
+```
