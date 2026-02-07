@@ -20,6 +20,7 @@ import { queueUpload } from "./upload"
 interface WatcherState {
 	sessionDir: string
 	watcher: FSWatcher | null
+	pollInterval: Timer | null
 	seenFiles: Set<string>
 	queuedFiles: Set<string>
 	isRunning: boolean
@@ -28,17 +29,21 @@ interface WatcherState {
 const state: WatcherState = {
 	sessionDir: "",
 	watcher: null,
+	pollInterval: null,
 	seenFiles: new Set(),
 	queuedFiles: new Set(),
 	isRunning: false,
 }
 
+// Poll interval in milliseconds (fallback for unreliable fs.watch)
+const POLL_INTERVAL_MS = 5000
+
 /**
  * Extract segment number from jack_capture filename
- * e.g., "jack_capture_001.wav" -> 1
+ * e.g., "jack_capture.00.wav" -> 0, "jack_capture.01.wav" -> 1
  */
 function extractSegmentNumber(filename: string): number {
-	const match = filename.match(/jack_capture_(\d+)\.wav$/)
+	const match = filename.match(/jack_capture\.(\d+)\.wav$/)
 	if (match) {
 		return parseInt(match[1], 10)
 	}
@@ -52,7 +57,7 @@ async function getWavFiles(dir: string): Promise<string[]> {
 	try {
 		const files = await readdir(dir)
 		return files
-			.filter((f) => f.endsWith(".wav") && f.startsWith("jack_capture_"))
+			.filter((f) => f.endsWith(".wav") && f.startsWith("jack_capture."))
 			.sort((a, b) => extractSegmentNumber(a) - extractSegmentNumber(b))
 	} catch {
 		return []
@@ -112,7 +117,7 @@ function handleFsEvent(eventType: string, filename: string | null): void {
 	if (!state.isRunning) return
 	if (!filename) return
 	if (!filename.endsWith(".wav")) return
-	if (!filename.startsWith("jack_capture_")) return
+	if (!filename.startsWith("jack_capture.")) return
 
 	logger.debug({ eventType, filename }, "File system event")
 
@@ -147,8 +152,18 @@ export function startWatcher(sessionDir: string): void {
 		logger.info({ sessionDir }, "Started watching for segment files")
 	} catch (err) {
 		logger.error({ err, sessionDir }, "Failed to start file watcher")
-		state.isRunning = false
+		// Continue anyway - we have polling as fallback
 	}
+
+	// Also poll periodically as fallback (fs.watch can be unreliable on Linux)
+	state.pollInterval = setInterval(() => {
+		if (state.isRunning) {
+			processNewFiles().catch((err) => {
+				logger.error({ err }, "Error in poll scan")
+			})
+		}
+	}, POLL_INTERVAL_MS)
+	logger.info({ pollIntervalMs: POLL_INTERVAL_MS }, "Started polling for segment files")
 }
 
 /**
@@ -163,6 +178,12 @@ export async function stopWatcher(): Promise<void> {
 	if (state.watcher) {
 		state.watcher.close()
 		state.watcher = null
+	}
+
+	// Stop polling
+	if (state.pollInterval) {
+		clearInterval(state.pollInterval)
+		state.pollInterval = null
 	}
 
 	// Wait a moment for any final file writes to complete
