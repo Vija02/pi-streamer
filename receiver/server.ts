@@ -1,7 +1,7 @@
 /**
  * XR18 Audio Stream Receiver
  *
- * Receives 18-channel FLAC audio streams from the sender.
+ * Receives 18-channel audio streams (WAV or FLAC) from the sender.
  *
  * Architecture:
  * 1. Receive audio data via HTTP POST
@@ -72,6 +72,7 @@ interface StreamMetadata {
   sampleRate: number;
   channels: number;
   timestamp: string;
+  format: "wav" | "flac";
 }
 
 interface UploadQueueItem {
@@ -95,12 +96,12 @@ function log(message: string, ...args: unknown[]) {
 }
 
 function generateS3Key(metadata: StreamMetadata): string {
-  const { sessionId, segmentNumber, timestamp } = metadata;
+  const { sessionId, segmentNumber, timestamp, format } = metadata;
   const segmentSuffix =
     segmentNumber !== undefined
       ? `_seg${String(segmentNumber).padStart(5, "0")}`
       : "";
-  return `${config.s3.prefix}${sessionId}/${timestamp}${segmentSuffix}.flac`;
+  return `${config.s3.prefix}${sessionId}/${timestamp}${segmentSuffix}.${format}`;
 }
 
 async function ensureDir(dir: string) {
@@ -122,7 +123,7 @@ async function saveLocally(
     metadata.segmentNumber !== undefined
       ? `_seg${String(metadata.segmentNumber).padStart(5, "0")}`
       : "";
-  const filename = `${metadata.timestamp}${segmentSuffix}.flac`;
+  const filename = `${metadata.timestamp}${segmentSuffix}.${metadata.format}`;
   const filepath = path.join(sessionDir, filename);
 
   await fs.writeFile(filepath, data);
@@ -140,8 +141,9 @@ async function uploadToS3(item: UploadQueueItem): Promise<boolean> {
     const data = await fs.readFile(item.localPath);
 
     // Use Bun's S3Client.file() to get an S3File reference and write to it
+    const contentType = item.metadata.format === "wav" ? "audio/wav" : "audio/flac";
     const s3File = s3Client.file(item.s3Key, {
-      type: "audio/flac",
+      type: contentType,
     });
 
     await s3File.write(data);
@@ -250,6 +252,8 @@ async function handleStreamUpload(req: Request): Promise<Response> {
   const segmentNumber = req.headers.get("x-segment-number");
   const sampleRate = Number(req.headers.get("x-sample-rate")) || 48000;
   const channels = Number(req.headers.get("x-channels")) || 18;
+  const contentType = req.headers.get("content-type") || "audio/wav";
+  const format: "wav" | "flac" = contentType.includes("flac") ? "flac" : "wav";
 
   const metadata: StreamMetadata = {
     sessionId,
@@ -257,6 +261,7 @@ async function handleStreamUpload(req: Request): Promise<Response> {
     sampleRate,
     channels,
     timestamp: new Date().toISOString().replace(/[:.]/g, "-"),
+    format,
   };
 
   log(
@@ -355,12 +360,12 @@ async function handleListSessions(): Promise<Response> {
       if (entry.isDirectory() && !entry.name.startsWith(".")) {
         const sessionDir = path.join(config.localStorage.dir, entry.name);
         const files = await fs.readdir(sessionDir);
-        const flacFiles = files.filter((f) => f.endsWith(".flac"));
+        const audioFiles = files.filter((f) => f.endsWith(".flac") || f.endsWith(".wav"));
 
         sessions.push({
           sessionId: entry.name,
-          segmentCount: flacFiles.length,
-          files: flacFiles,
+          segmentCount: audioFiles.length,
+          files: audioFiles,
         });
       }
     }
