@@ -43,9 +43,7 @@ async function recordSegment(outputPath: string): Promise<boolean> {
 	} catch (err: any) {
 		const stderr = err?.stderr?.toString?.() || ""
 		// jack_capture may exit with error but still produce valid file
-		// Note: jack_capture adds .wav extension automatically
-		const actualFile = `${outputPath}.wav`
-		if (await Bun.file(actualFile).exists()) {
+		if (await Bun.file(outputPath).exists()) {
 			logger.warn(
 				{ stderr: stderr.trim() },
 				"jack_capture exited with error but file exists",
@@ -179,10 +177,9 @@ export async function startRecording(): Promise<void> {
 		}
 
 		const timestamp = formatTimestamp(new Date())
-		// Note: jack_capture adds the extension automatically based on -f format
 		const segmentFile = join(
 			sessionDir,
-			`seg_${String(segmentNumber).padStart(5, "0")}_${timestamp}`,
+			`seg_${String(segmentNumber).padStart(5, "0")}_${timestamp}.wav`,
 		)
 
 		logger.info(
@@ -203,10 +200,8 @@ export async function startRecording(): Promise<void> {
 		}
 
 		// Queue for upload if enabled
-		// jack_capture adds the extension automatically
-		const outputFile = `${segmentFile}.wav`
-		if (config.uploadEnabled && (await Bun.file(outputFile).exists())) {
-			queueUpload(outputFile, segmentNumber)
+		if (config.uploadEnabled && (await Bun.file(segmentFile).exists())) {
+			queueUpload(segmentFile, segmentNumber)
 		}
 
 		segmentNumber++
