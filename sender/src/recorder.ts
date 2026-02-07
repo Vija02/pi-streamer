@@ -29,13 +29,13 @@ async function recordSegment(outputPath: string): Promise<boolean> {
 	try {
 		// jack_capture options:
 		// -d <duration> : recording duration in seconds
-		// -f <format>   : output format (flac, wav, etc.)
+		// -f <format>   : output format (wav - note: flac not supported by libsndfile)
 		// -b <bits>     : bit depth
 		// -p <port>     : port to capture (repeat for each port)
 		// -fn <file>    : output filename
 		await $`jack_capture \
       -d ${segmentDuration} \
-      -f flac \
+      -f wav \
       -b 24 \
       ${portArgs} \
       -fn ${outputPath}`.quiet()

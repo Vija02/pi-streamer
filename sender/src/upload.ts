@@ -30,10 +30,14 @@ async function uploadFile(
     const fileData = await file.arrayBuffer();
     const fileName = filePath.split("/").pop();
 
+    // Determine content type based on file extension
+    const ext = filePath.split(".").pop()?.toLowerCase();
+    const contentType = ext === "flac" ? "audio/flac" : "audio/wav";
+
     const response = await fetch(config.streamUrl, {
       method: "POST",
       headers: {
-        "Content-Type": "audio/flac",
+        "Content-Type": contentType,
         "X-Session-ID": sessionId,
         "X-Segment-Number": String(segmentNumber),
         "X-Sample-Rate": String(config.sampleRate),

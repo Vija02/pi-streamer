@@ -40,7 +40,7 @@ export function loadConfig(): Config {
 
     // Local recording settings
     recordingDir: process.env.RECORDING_DIR || "./recordings",
-    recordingFormat: process.env.RECORDING_FORMAT || "flac",
+    recordingFormat: process.env.RECORDING_FORMAT || "wav",
 
     // Audio settings
     sampleRate: Number(process.env.SAMPLE_RATE) || 48000,
