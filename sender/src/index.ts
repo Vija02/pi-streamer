@@ -33,10 +33,16 @@ import { uploadPending } from "./upload";
  * Check that all required dependencies are installed
  */
 async function checkDependencies(): Promise<string[]> {
+  const config = getConfig();
   const missing: string[] = [];
 
   if (!(await commandExists("jack_capture"))) missing.push("jack_capture");
   if (!(await commandExists("jack_lsp"))) missing.push("jack (jack_lsp)");
+
+  // ffmpeg is required for compression (splitting 18-channel WAV to FLAC)
+  if (config.compressionEnabled && !(await commandExists("ffmpeg"))) {
+    missing.push("ffmpeg");
+  }
 
   return missing;
 }
@@ -97,18 +103,20 @@ Commands:
   help           - Show this help message
 
 Environment variables:
-  STREAM_URL          - Server URL (default: http://localhost:3000/stream)
-  RECORDING_DIR       - Local directory (default: ./recordings)
-  SAMPLE_RATE         - Audio sample rate (default: 48000)
-  CHANNELS            - Number of channels (default: 18)
-  JACK_PORT_PREFIX    - JACK port prefix (default: system:capture_)
-  SESSION_ID          - Session identifier (default: timestamp)
-  SEGMENT_DURATION    - Segment length in seconds (default: 30)
-  UPLOAD_ENABLED      - Enable server upload (default: true)
-  UPLOAD_RETRY_COUNT  - Upload retry attempts (default: 3)
-  FINISH_TRIGGER_PATH - File to touch to stop recording (default: /tmp/xr18-finish)
-  LOG_LEVEL           - Logging level: trace, debug, info, warn, error (default: info)
-  NODE_ENV            - Set to "production" for JSON logging
+  STREAM_URL            - Server URL (default: http://localhost:3000/stream)
+  RECORDING_DIR         - Local directory (default: ./recordings)
+  SAMPLE_RATE           - Audio sample rate (default: 48000)
+  CHANNELS              - Number of channels (default: 18)
+  JACK_PORT_PREFIX      - JACK port prefix (default: system:capture_)
+  SESSION_ID            - Session identifier (default: timestamp)
+  SEGMENT_DURATION      - Segment length in seconds (default: 30)
+  UPLOAD_ENABLED        - Enable server upload (default: true)
+  UPLOAD_RETRY_COUNT    - Upload retry attempts (default: 3)
+  COMPRESSION_ENABLED   - Compress WAV to FLAC before upload (default: true)
+  DELETE_AFTER_COMPRESS - Delete WAV after compression (default: true)
+  FINISH_TRIGGER_PATH   - File to touch to stop recording (default: /tmp/xr18-finish)
+  LOG_LEVEL             - Logging level: trace, debug, info, warn, error (default: info)
+  NODE_ENV              - Set to "production" for JSON logging
 `);
     return;
   }
@@ -119,7 +127,7 @@ Environment variables:
   // Check dependencies
   const missing = await checkDependencies();
   if (missing.length > 0) {
-    logger.fatal({ missing }, "Missing dependencies. Install with: sudo apt install jack-capture jackd2");
+    logger.fatal({ missing }, "Missing dependencies. Install with: sudo apt install jack-capture jackd2 ffmpeg");
     process.exit(1);
   }
 

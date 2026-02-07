@@ -1,21 +1,23 @@
 /**
  * File watcher for completed recording segments
  *
- * Monitors the session directory for new .flac files created by jack_capture.
+ * Monitors the session directory for new .wav files created by jack_capture.
  * When a new file appears, it means the previous file is complete and can be
- * uploaded.
+ * compressed and uploaded.
  *
  * Logic:
- * - jack_capture creates files like: jack_capture_001.flac, jack_capture_002.flac, etc.
- * - When jack_capture_002.flac appears, jack_capture_001.flac is complete
- * - We queue the completed file for upload
- * - On shutdown, we queue the final (current) file
+ * - jack_capture creates files like: jack_capture_001.wav, jack_capture_002.wav, etc.
+ * - When jack_capture_002.wav appears, jack_capture_001.wav is complete
+ * - We compress the WAV to FLAC (split into channel groups) and queue for upload
+ * - On shutdown, we process the final (current) file
  */
 import { watch, type FSWatcher } from "fs"
 import { readdir } from "fs/promises"
 import { join } from "path"
 import { watcherLogger as logger } from "./logger"
 import { queueUpload } from "./upload"
+import { compressWavToFlac, deleteOriginalWav } from "./compress"
+import { getConfig } from "./config"
 
 interface WatcherState {
 	sessionDir: string
@@ -23,6 +25,7 @@ interface WatcherState {
 	pollInterval: Timer | null
 	seenFiles: Set<string>
 	queuedFiles: Set<string>
+	processingFiles: Set<string>  // Files currently being compressed
 	isRunning: boolean
 }
 
@@ -32,6 +35,7 @@ const state: WatcherState = {
 	pollInterval: null,
 	seenFiles: new Set(),
 	queuedFiles: new Set(),
+	processingFiles: new Set(),
 	isRunning: false,
 }
 
@@ -40,10 +44,10 @@ const POLL_INTERVAL_MS = 5000
 
 /**
  * Extract segment number from jack_capture filename
- * e.g., "jack_capture.00.flac" -> 0, "jack_capture.01.flac" -> 1
+ * e.g., "jack_capture.00.wav" -> 0, "jack_capture.01.wav" -> 1
  */
 function extractSegmentNumber(filename: string): number {
-	const match = filename.match(/jack_capture\.(\d+)\.flac$/)
+	const match = filename.match(/jack_capture\.(\d+)\.wav$/)
 	if (match) {
 		return parseInt(match[1], 10)
 	}
@@ -51,13 +55,13 @@ function extractSegmentNumber(filename: string): number {
 }
 
 /**
- * Get all flac files in the session directory, sorted by segment number
+ * Get all wav files in the session directory, sorted by segment number
  */
-async function getFlacFiles(dir: string): Promise<string[]> {
+async function getWavFiles(dir: string): Promise<string[]> {
 	try {
 		const files = await readdir(dir)
 		return files
-			.filter((f) => f.endsWith(".flac") && f.startsWith("jack_capture."))
+			.filter((f) => f.endsWith(".wav") && f.startsWith("jack_capture."))
 			.sort((a, b) => extractSegmentNumber(a) - extractSegmentNumber(b))
 	} catch {
 		return []
@@ -65,10 +69,11 @@ async function getFlacFiles(dir: string): Promise<string[]> {
 }
 
 /**
- * Queue a file for upload if not already queued
+ * Process a completed WAV file: compress to FLAC and queue for upload
  */
-function queueFileForUpload(filename: string): void {
-	if (state.queuedFiles.has(filename)) {
+async function processFileForUpload(filename: string): Promise<void> {
+	// Skip if already queued or currently processing
+	if (state.queuedFiles.has(filename) || state.processingFiles.has(filename)) {
 		return
 	}
 
@@ -80,16 +85,47 @@ function queueFileForUpload(filename: string): void {
 		return
 	}
 
-	logger.info({ filename, segmentNumber }, "Queueing completed segment for upload")
-	state.queuedFiles.add(filename)
-	queueUpload(filePath, segmentNumber)
+	const config = getConfig()
+
+	// Mark as processing
+	state.processingFiles.add(filename)
+
+	try {
+		if (config.compressionEnabled) {
+			// Compress WAV to FLAC channel groups
+			logger.info({ filename, segmentNumber }, "Compressing segment")
+			const compressed = await compressWavToFlac(filePath, segmentNumber)
+
+			// Queue each FLAC file for upload
+			for (const flacPath of compressed.flacFiles) {
+				queueUpload(flacPath, segmentNumber)
+			}
+
+			// Delete original WAV to save space
+			if (config.deleteAfterCompress) {
+				await deleteOriginalWav(filePath)
+			}
+		} else {
+			// No compression - upload WAV directly
+			queueUpload(filePath, segmentNumber)
+		}
+
+		state.queuedFiles.add(filename)
+		logger.info({ filename, segmentNumber }, "Segment processed and queued for upload")
+	} catch (err) {
+		logger.error({ err, filename }, "Failed to process segment")
+		// Remove from processing so it can be retried
+		state.processingFiles.delete(filename)
+	} finally {
+		state.processingFiles.delete(filename)
+	}
 }
 
 /**
  * Process new files - queue completed segments for upload
  */
 async function processNewFiles(): Promise<void> {
-	const currentFiles = await getFlacFiles(state.sessionDir)
+	const currentFiles = await getWavFiles(state.sessionDir)
 
 	for (const file of currentFiles) {
 		if (!state.seenFiles.has(file)) {
@@ -103,10 +139,13 @@ async function processNewFiles(): Promise<void> {
 		(a, b) => extractSegmentNumber(a) - extractSegmentNumber(b)
 	)
 
-	// Queue all files except the last one (which is still being written)
-	// The last file will be queued when recording stops or a new file appears
+	// Process all files except the last one (which is still being written)
+	// The last file will be processed when recording stops or a new file appears
 	for (let i = 0; i < sortedFiles.length - 1; i++) {
-		queueFileForUpload(sortedFiles[i])
+		// Don't await - process in background
+		processFileForUpload(sortedFiles[i]).catch((err) => {
+			logger.error({ err, file: sortedFiles[i] }, "Error processing file")
+		})
 	}
 }
 
@@ -116,7 +155,7 @@ async function processNewFiles(): Promise<void> {
 function handleFsEvent(eventType: string, filename: string | null): void {
 	if (!state.isRunning) return
 	if (!filename) return
-	if (!filename.endsWith(".flac")) return
+	if (!filename.endsWith(".wav")) return
 	if (!filename.startsWith("jack_capture.")) return
 
 	logger.debug({ eventType, filename }, "File system event")
@@ -139,6 +178,7 @@ export function startWatcher(sessionDir: string): void {
 	state.sessionDir = sessionDir
 	state.seenFiles = new Set()
 	state.queuedFiles = new Set()
+	state.processingFiles = new Set()
 	state.isRunning = true
 
 	// Do an initial scan for any existing files
@@ -189,17 +229,24 @@ export async function stopWatcher(): Promise<void> {
 	// Wait a moment for any final file writes to complete
 	await Bun.sleep(1000)
 
-	// Do a final scan and queue ALL remaining files (including the last one)
-	const finalFiles = await getFlacFiles(state.sessionDir)
+	// Do a final scan and process ALL remaining files (including the last one)
+	const finalFiles = await getWavFiles(state.sessionDir)
 
+	// Process all remaining files - must await for these since we're shutting down
 	for (const file of finalFiles) {
 		state.seenFiles.add(file)
-		queueFileForUpload(file)
+		if (!state.queuedFiles.has(file) && !state.processingFiles.has(file)) {
+			try {
+				await processFileForUpload(file)
+			} catch (err) {
+				logger.error({ err, file }, "Error processing final file")
+			}
+		}
 	}
 
 	logger.info(
 		{ totalFiles: state.seenFiles.size, queuedFiles: state.queuedFiles.size },
-		"Watcher stopped, queued remaining files"
+		"Watcher stopped, processed remaining files"
 	)
 }
 

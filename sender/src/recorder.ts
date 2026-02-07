@@ -81,7 +81,7 @@ function buildJackCaptureArgs(sessionDir: string): string[] {
 	const filenamePrefix = join(sessionDir, "jack_capture")
 
 	const args = [
-		"-f", "flac",          // Output format (FLAC for compression - silent channels compress well)
+		"-f", "wav",           // Output format (WAV - will be compressed to FLAC after recording)
 		"-b", "24",            // Bit depth
 		"-Rf", String(rotateFrames), // Rotate file every N frames
 		"-fn", filenamePrefix, // Filename prefix

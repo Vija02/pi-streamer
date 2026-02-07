@@ -19,12 +19,15 @@ Both sender and receiver prioritize local storage first, then upload in the back
 │  (USB/Net)  │               │(jack_capture)│  (per segment)    │  (Bun/Node)  │
 └─────────────┘               └──────────────┘                   └──────────────┘
                                     │                                   │
-                                    │ 1. Save                           │ 1. Save
-                                    │    locally                        │    locally
-                                    │    (FLAC)                         │
+                                    │ 1. Record                         │ 1. Save
+                                    │    WAV                            │    locally
                                     │                                   │
-                                    │ 2. Upload                         │ 2. Queue for
-                                    │    segment                        │    S3 upload
+                                    │ 2. Compress                       │ 2. Queue for
+                                    │    to FLAC                        │    S3 upload
+                                    │    (3 files)                      │
+                                    │                                   │
+                                    │ 3. Upload                         │
+                                    │    segments                       │
                                     ▼                                   ▼
                               ./recordings/                       ./received/
                               {session_id}/                       {session_id}/
@@ -42,7 +45,7 @@ Both sender and receiver prioritize local storage first, then upload in the back
 
 - **Gapless recording**: Uses `jack_capture` with `--rotatefile` for seamless segment rotation
 - **18 channels**: Unlike FFmpeg (limited to 8 JACK channels), `jack_capture` supports unlimited channels
-- **FLAC compression**: Lossless compression reduces file sizes significantly, especially for silent/unused channels
+- **FLAC compression**: Records as WAV, then compresses to FLAC channel groups (FLAC only supports 8 channels max, so we split into 3 groups of 6)
 - **Fault tolerant**: Local recording always works, uploads happen in background with retries
 - **Graceful shutdown**: Stop via SIGINT, SIGTERM, or touch a trigger file
 
@@ -53,13 +56,14 @@ Both sender and receiver prioritize local storage first, then upload in the back
 - Bun runtime
 - JACK audio server (`jackd2`)
 - `jack_capture` (supports unlimited channels)
+- `ffmpeg` (for WAV to FLAC compression)
 
 ```bash
 # Ubuntu/Debian
-sudo apt install jackd2 jack-capture
+sudo apt install jackd2 jack-capture ffmpeg
 
 # Arch
-sudo pacman -S jack2 jack_capture
+sudo pacman -S jack2 jack_capture ffmpeg
 
 # Install Bun
 curl -fsSL https://bun.sh/install | bash
@@ -156,10 +160,12 @@ bun run start
 | `JACK_PORT_PREFIX`    | `system:capture_`              | JACK port prefix                             |
 | `SESSION_ID`          | (timestamp)                    | Unique session ID                            |
 | `SEGMENT_DURATION`    | `30`                           | Segment length in seconds                    |
-| `UPLOAD_ENABLED`      | `true`                         | Enable server upload                         |
-| `UPLOAD_RETRY_COUNT`  | `3`                            | Upload retry attempts                        |
-| `UPLOAD_RETRY_DELAY`  | `5000`                         | Delay between retries (ms)                   |
-| `FINISH_TRIGGER_PATH` | `/tmp/xr18-finish`             | Touch this file to stop recording gracefully |
+| `UPLOAD_ENABLED`        | `true`                         | Enable server upload                         |
+| `UPLOAD_RETRY_COUNT`    | `3`                            | Upload retry attempts                        |
+| `UPLOAD_RETRY_DELAY`    | `5000`                         | Delay between retries (ms)                   |
+| `COMPRESSION_ENABLED`   | `true`                         | Compress WAV to FLAC before upload           |
+| `DELETE_AFTER_COMPRESS` | `true`                         | Delete original WAV after compression        |
+| `FINISH_TRIGGER_PATH`   | `/tmp/xr18-finish`             | Touch this file to stop recording gracefully |
 | `LOG_LEVEL`           | `info`                         | Logging level: trace, debug, info, warn, error |
 | `NODE_ENV`            | -                              | Set to "production" for JSON logging         |
 
@@ -184,21 +190,31 @@ bun run start
 
 ### FLAC Compression
 
-The sender records in FLAC format (lossless compression). This significantly reduces file sizes:
+Since FLAC only supports up to 8 channels, we split the 18-channel WAV into 3 groups of 6 channels each:
 
-| Scenario                          | WAV Size | FLAC Size | Savings |
-| --------------------------------- | -------- | --------- | ------- |
-| All 18 channels active (loud)     | ~74 MB   | ~35-50 MB | 30-50%  |
-| Some channels silent              | ~74 MB   | ~10-30 MB | 60-85%  |
-| Mostly silent (few active channels) | ~74 MB | ~1-5 MB   | 93-98%  |
+- `segment_XX_ch01-06.flac` - Channels 1-6
+- `segment_XX_ch07-12.flac` - Channels 7-12
+- `segment_XX_ch13-18.flac` - Channels 13-18
+
+This provides lossless compression with significant size reduction:
+
+| Scenario                            | WAV Size | Total FLAC Size | Savings |
+| ----------------------------------- | -------- | --------------- | ------- |
+| All 18 channels active (loud)       | ~74 MB   | ~35-50 MB       | 30-50%  |
+| Some channels silent                | ~74 MB   | ~10-30 MB       | 60-85%  |
+| Mostly silent (few active channels) | ~74 MB   | ~1-5 MB         | 93-98%  |
 
 Silent channels compress to almost nothing, making FLAC ideal for multi-channel recording where not all inputs are used.
 
 ### File Naming
 
-- **Sender**: `./recordings/{session_id}/jack_capture.00.flac`, `jack_capture.01.flac`, ...
-- **Receiver local**: `./received/{session_id}/{timestamp}_seg00001.flac`
-- **S3**: `recordings/{session_id}/{timestamp}_seg00001.flac`
+**Sender (local)**:
+- WAV (temporary): `./recordings/{session_id}/jack_capture.00.wav`
+- FLAC (after compression): `./recordings/{session_id}/segment_00_ch01-06.flac`, etc.
+
+**Receiver**:
+- Local: `./received/{session_id}/{timestamp}_seg00001.flac`
+- S3: `recordings/{session_id}/{timestamp}_seg00001.flac`
 
 ## API Endpoints
 
@@ -302,10 +318,10 @@ jackd -d alsa -d hw:XR18 -r 48000
 
 ### "Missing dependencies"
 
-Install jack_capture:
+Install required packages:
 
 ```bash
-sudo apt install jack-capture jackd2
+sudo apt install jack-capture jackd2 ffmpeg
 ```
 
 ### "Could not connect port"
@@ -339,7 +355,7 @@ Ensure the watcher is running. Check logs for:
 Started watching for segment files
 ```
 
-The watcher looks for files matching `jack_capture.XX.flac` pattern.
+The watcher looks for files matching `jack_capture.XX.wav` pattern.
 
 ## Project Structure
 
@@ -350,6 +366,7 @@ pi-streamer/
 │       ├── index.ts       # Main entry point
 │       ├── recorder.ts    # jack_capture recording logic
 │       ├── watcher.ts     # File watcher for completed segments
+│       ├── compress.ts    # WAV to FLAC compression (splits into channel groups)
 │       ├── upload.ts      # Upload queue management
 │       ├── jack.ts        # JACK utilities
 │       ├── config.ts      # Configuration

@@ -9,7 +9,6 @@ export interface Config {
 
   // Local recording settings
   recordingDir: string;
-  recordingFormat: string;
 
   // Audio settings
   sampleRate: number;
@@ -29,6 +28,10 @@ export interface Config {
   uploadRetryCount: number;
   uploadRetryDelay: number;
 
+  // Compression settings
+  compressionEnabled: boolean;
+  deleteAfterCompress: boolean;
+
   // Finish trigger file path
   finishTriggerPath: string;
 }
@@ -40,7 +43,6 @@ export function loadConfig(): Config {
 
     // Local recording settings
     recordingDir: process.env.RECORDING_DIR || "./recordings",
-    recordingFormat: process.env.RECORDING_FORMAT || "wav",
 
     // Audio settings
     sampleRate: Number(process.env.SAMPLE_RATE) || 48000,
@@ -59,6 +61,10 @@ export function loadConfig(): Config {
     uploadEnabled: process.env.UPLOAD_ENABLED !== "false",
     uploadRetryCount: Number(process.env.UPLOAD_RETRY_COUNT) || 3,
     uploadRetryDelay: Number(process.env.UPLOAD_RETRY_DELAY) || 5000,
+
+    // Compression settings
+    compressionEnabled: process.env.COMPRESSION_ENABLED !== "false",
+    deleteAfterCompress: process.env.DELETE_AFTER_COMPRESS !== "false",
 
     // Finish trigger - touch this file to gracefully stop recording
     finishTriggerPath: process.env.FINISH_TRIGGER_PATH || "/tmp/xr18-finish",
