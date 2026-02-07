@@ -23,3 +23,4 @@ export const logger = pino({
 export const jackLogger = logger.child({ module: "jack" });
 export const uploadLogger = logger.child({ module: "upload" });
 export const recordingLogger = logger.child({ module: "recording" });
+export const watcherLogger = logger.child({ module: "watcher" });

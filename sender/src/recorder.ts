@@ -3,68 +3,30 @@
  *
  * Uses jack_capture instead of FFmpeg because FFmpeg JACK input
  * only supports up to 8 channels, while XR18 has 18 channels.
+ *
+ * GAPLESS RECORDING:
+ * Uses jack_capture's built-in --rotatefile option for gapless segment rotation.
+ * A single continuous jack_capture process runs and automatically rotates
+ * files at the specified interval. No gaps between segments.
  */
-import { $ } from "bun"
+import { $, spawn, type Subprocess } from "bun"
 import { join } from "path"
 import { getConfig } from "./config"
 import { recordingLogger as logger } from "./logger"
-import { formatTimestamp } from "./utils"
 import { checkJackSetup, getSourcePorts } from "./jack"
-import { queueUpload, waitForQueueEmpty, getQueueLength } from "./upload"
-
-/**
- * Record a single segment using jack_capture
- */
-async function recordSegment(outputPath: string): Promise<boolean> {
-	const config = getConfig()
-	const { channels, segmentDuration, jackPortPrefix } = config
-
-	// Build port arguments for jack_capture
-	// jack_capture uses -p for each port to capture
-	const portArgs: string[] = []
-	for (let i = 1; i <= channels; i++) {
-		portArgs.push("-p", `${jackPortPrefix}${i}`)
-	}
-
-	try {
-		// jack_capture options:
-		// -d <duration> : recording duration in seconds
-		// -f <format>   : output format (wav - note: flac not supported by libsndfile)
-		// -b <bits>     : bit depth
-		// -p <port>     : port to capture (repeat for each port)
-		// -fn <file>    : output filename
-		await $`jack_capture \
-      -d ${segmentDuration} \
-      -f wav \
-      -b 24 \
-      ${portArgs} \
-      -fn ${outputPath}`.quiet()
-		return true
-	} catch (err: any) {
-		const stderr = err?.stderr?.toString?.() || ""
-		// jack_capture may exit with error but still produce valid file
-		if (await Bun.file(outputPath).exists()) {
-			logger.warn(
-				{ stderr: stderr.trim() },
-				"jack_capture exited with error but file exists",
-			)
-			return true
-		}
-		logger.error({ error: stderr.trim() }, "jack_capture failed")
-		return false
-	}
-}
+import { waitForQueueEmpty, getQueueLength } from "./upload"
+import { startWatcher, stopWatcher } from "./watcher"
 
 export interface RecorderState {
 	isRunning: boolean
-	segmentCount: number
 	sessionDir: string
+	process: Subprocess<"ignore", "pipe", "pipe"> | null
 }
 
 let state: RecorderState = {
 	isRunning: false,
-	segmentCount: 0,
 	sessionDir: "",
+	process: null,
 }
 
 /**
@@ -88,17 +50,49 @@ async function clearFinishTrigger(): Promise<void> {
 }
 
 /**
- * Stop the recording loop
+ * Stop the recording process
  */
 export function stopRecording(): void {
 	state.isRunning = false
+	if (state.process) {
+		// Send SIGINT to jack_capture for graceful shutdown
+		state.process.kill("SIGINT")
+	}
 }
 
 /**
  * Get the current recorder state
  */
 export function getRecorderState(): RecorderState {
-	return { ...state }
+	return { ...state, process: null } // Don't expose the process object
+}
+
+/**
+ * Build jack_capture command arguments for continuous recording with file rotation
+ */
+function buildJackCaptureArgs(sessionDir: string): string[] {
+	const config = getConfig()
+	const { channels, sampleRate, segmentDuration, jackPortPrefix } = config
+
+	// Calculate rotation interval in audio frames
+	const rotateFrames = segmentDuration * sampleRate
+
+	// Filename prefix - jack_capture will add _001, _002, etc.
+	const filenamePrefix = join(sessionDir, "jack_capture")
+
+	const args = [
+		"-f", "wav",           // Output format
+		"-b", "24",            // Bit depth
+		"-Rf", String(rotateFrames), // Rotate file every N frames
+		"-fn", filenamePrefix, // Filename prefix
+	]
+
+	// Add port arguments for each channel
+	for (let i = 1; i <= channels; i++) {
+		args.push("-p", `${jackPortPrefix}${i}`)
+	}
+
+	return args
 }
 
 /**
@@ -142,6 +136,7 @@ export async function startRecording(): Promise<void> {
 			channels: config.channels,
 			sampleRate: config.sampleRate,
 			segmentDuration: config.segmentDuration,
+			rotateFrames: config.segmentDuration * config.sampleRate,
 			recordingDir: sessionDir,
 			uploadEnabled: config.uploadEnabled,
 			streamUrl: config.uploadEnabled ? config.streamUrl : undefined,
@@ -151,64 +146,70 @@ export async function startRecording(): Promise<void> {
 		"Configuration loaded",
 	)
 
-	let segmentNumber = 0
+	// Start the file watcher before recording
+	if (config.uploadEnabled) {
+		startWatcher(sessionDir)
+		logger.info("File watcher started")
+	}
+
+	// Build jack_capture arguments
+	const args = buildJackCaptureArgs(sessionDir)
+	logger.info({ command: `jack_capture ${args.join(" ")}` }, "Starting jack_capture")
+
+	// Start jack_capture process
+	state.process = spawn(["jack_capture", ...args], {
+		stdout: "pipe",
+		stderr: "pipe",
+		stdin: "ignore",
+	})
 	state.isRunning = true
+
+	logger.info(
+		"Recording started (gapless mode with file rotation). Touch finish trigger file to stop gracefully.",
+	)
 
 	// Handle graceful shutdown
 	const shutdown = () => {
 		logger.info("Shutdown signal received")
-		state.isRunning = false
+		stopRecording()
 	}
 
 	process.on("SIGINT", shutdown)
 	process.on("SIGTERM", shutdown)
 
-	logger.info(
-		"Recording loop started. Touch finish trigger file to stop gracefully.",
-	)
-
-	while (state.isRunning) {
-		// Check for finish trigger
-		if (await checkFinishTrigger()) {
-			logger.info("Finish trigger detected, stopping after current segment")
-			state.isRunning = false
-			await clearFinishTrigger()
-			// Continue to finish current segment
-		}
-
-		const timestamp = formatTimestamp(new Date())
-		const segmentFile = join(
-			sessionDir,
-			`seg_${String(segmentNumber).padStart(5, "0")}_${timestamp}.wav`,
-		)
-
-		logger.info(
-			{ segment: segmentNumber, file: segmentFile.split("/").pop() },
-			"Recording segment",
-		)
-
-		// Record segment using jack_capture
-		const success = await recordSegment(segmentFile)
-
-		if (!success) {
-			logger.error(
-				{ segment: segmentNumber },
-				"Failed to record segment, retrying...",
-			)
+	// Monitor for finish trigger in background
+	const triggerCheck = async () => {
+		while (state.isRunning) {
+			if (await checkFinishTrigger()) {
+				logger.info("Finish trigger detected, stopping recording")
+				await clearFinishTrigger()
+				stopRecording()
+				break
+			}
 			await Bun.sleep(1000)
-			continue
 		}
+	}
+	triggerCheck() // Start in background (don't await)
 
-		// Queue for upload if enabled
-		if (config.uploadEnabled && (await Bun.file(segmentFile).exists())) {
-			queueUpload(segmentFile, segmentNumber)
-		}
+	// Wait for jack_capture to exit
+	const exitCode = await state.process.exited
 
-		segmentNumber++
-		state.segmentCount = segmentNumber
+	if (exitCode !== 0 && state.isRunning) {
+		// Unexpected exit
+		const stderr = await new Response(state.process.stderr).text()
+		logger.error({ exitCode, stderr: stderr.trim() }, "jack_capture exited unexpectedly")
+	} else {
+		logger.info({ exitCode }, "jack_capture stopped")
 	}
 
-	logger.info({ segments: segmentNumber }, "Recording stopped")
+	state.isRunning = false
+	state.process = null
+
+	// Stop the file watcher and process any remaining files
+	if (config.uploadEnabled) {
+		await stopWatcher()
+		logger.info("File watcher stopped")
+	}
 
 	// Wait for upload queue to finish
 	const pendingUploads = getQueueLength()
