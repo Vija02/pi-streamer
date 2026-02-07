@@ -5,10 +5,10 @@ import { $ } from "bun";
 
 /**
  * Format a date as a compact timestamp string
- * Example: 20260206T163045
+ * Example: 20260206163045
  */
 export function formatTimestamp(date: Date): string {
-  return date.toISOString().replace(/[-:T]/g, "").slice(0, 15);
+  return date.toISOString().replace(/[-:T.]/g, "").slice(0, 14);
 }
 
 /**
