@@ -731,11 +731,11 @@ async function serveStaticFile(urlPath: string): Promise<Response | null> {
   // Default to index.html for root or paths without extension (SPA routing)
   let filePath = urlPath === "/" ? "/index.html" : urlPath;
 
-  // For SPA routing: if path has no extension and doesn't start with /api, serve index.html
+  // For SPA routing: if path has no extension and doesn't match API routes, serve index.html
   const ext = path.extname(filePath);
-  if (!ext && !urlPath.startsWith("/api") && !urlPath.startsWith("/stream") && 
-      !urlPath.startsWith("/session") && !urlPath.startsWith("/health") && 
-      !urlPath.startsWith("/retry")) {
+  const apiRoutes = ["/api", "/stream", "/session/complete", "/session/process", "/health", "/retry"];
+  const isApiRoute = apiRoutes.some(route => urlPath === route || urlPath.startsWith(route + "/") || urlPath.startsWith("/api/"));
+  if (!ext && !isApiRoute) {
     filePath = "/index.html";
   }
 
