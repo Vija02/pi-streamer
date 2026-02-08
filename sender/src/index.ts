@@ -117,6 +117,15 @@ Environment variables:
   FINISH_TRIGGER_PATH   - File to touch to stop recording (default: /tmp/xr18-finish)
   LOG_LEVEL             - Logging level: trace, debug, info, warn, error (default: info)
   NODE_ENV              - Set to "production" for JSON logging
+
+JACK auto-start settings:
+  JACK_AUTO_START       - Auto-start JACK if not running (default: true)
+  JACK_DRIVER           - JACK driver (default: alsa)
+  JACK_DEVICE           - JACK device (default: hw:XR18)
+  JACK_SAMPLE_RATE      - JACK sample rate (default: 48000)
+  JACK_PERIOD_SIZE      - JACK period size (default: 2048)
+  JACK_NPERIODS         - JACK number of periods (default: 3)
+  JACK_STARTUP_WAIT_MS  - Time to wait for JACK startup (default: 3000)
 `);
     return;
   }
