@@ -8,6 +8,8 @@ services:
     volumes:
       - ./data:/app/data
       - ./received:/app/received
+    env_file:
+      - .env
     environment:
       - PORT=3000
     networks:
