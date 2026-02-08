@@ -41,6 +41,7 @@ const config = {
     accessKeyId: process.env.AWS_ACCESS_KEY_ID || "",
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "",
     endpoint: process.env.S3_ENDPOINT,
+    publicUrl: process.env.S3_PUBLIC_URL, // Public URL base for accessing files (e.g., https://files.example.com)
     prefix: process.env.S3_PREFIX || "processed/",
   },
   localStorage: {
@@ -271,11 +272,17 @@ async function uploadMp3ToS3(
 
     await s3File.write(new Uint8Array(data));
 
-    // Construct URL
+    // Construct URL - ensure it has a protocol prefix
+    const ensureProtocol = (url: string) =>
+      url.startsWith("http://") || url.startsWith("https://") ? url : `https://${url}`;
+
     let s3Url: string;
-    if (config.s3.endpoint) {
-      // Custom endpoint (R2, MinIO, etc.)
-      s3Url = `${config.s3.endpoint}/${config.s3.bucket}/${s3Key}`;
+    if (config.s3.publicUrl) {
+      // Use explicit public URL (for R2, custom domains, etc.)
+      s3Url = `${ensureProtocol(config.s3.publicUrl)}/${s3Key}`;
+    } else if (config.s3.endpoint) {
+      // Custom endpoint (R2, MinIO, etc.) - use endpoint as public URL
+      s3Url = `${ensureProtocol(config.s3.endpoint)}/${config.s3.bucket}/${s3Key}`;
     } else {
       // Standard AWS S3
       s3Url = `https://${config.s3.bucket}.s3.${config.s3.region}.amazonaws.com/${s3Key}`;
