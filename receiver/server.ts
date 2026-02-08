@@ -345,16 +345,19 @@ async function handleStreamUpload(req: Request): Promise<Response> {
     // Upsert session in database (creates if new, updates timestamp if exists)
     upsertSession(sessionId, sampleRate, channels);
 
-    // Determine channel group from content-disposition or use default
-    const contentDisposition = req.headers.get("content-disposition");
-    let channelGroup: string | undefined;
+    // Determine channel group from X-Channel-Group header first, then fallback to content-disposition
+    let channelGroup: string | undefined = req.headers.get("x-channel-group") || undefined;
 
-    if (contentDisposition) {
-      const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
-      if (filenameMatch) {
-        channelGroup = extractChannelGroup(filenameMatch[1]);
-        if (segmentNumber === undefined) {
-          segmentNumber = extractSegmentNumber(filenameMatch[1]);
+    // Fallback: try to extract from content-disposition header
+    if (!channelGroup) {
+      const contentDisposition = req.headers.get("content-disposition");
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
+        if (filenameMatch) {
+          channelGroup = extractChannelGroup(filenameMatch[1]);
+          if (segmentNumber === undefined) {
+            segmentNumber = extractSegmentNumber(filenameMatch[1]);
+          }
         }
       }
     }

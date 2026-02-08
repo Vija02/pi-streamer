@@ -8,7 +8,7 @@
  * 4. Upload to S3
  */
 import { $ } from "bun";
-import { join, dirname } from "path";
+import { join, dirname, resolve } from "path";
 import { mkdir, writeFile, unlink, stat } from "fs/promises";
 import { S3Client } from "bun";
 import {
@@ -116,18 +116,24 @@ async function extractChannelFromFlac(
   // pan=mono|c0=c{channelIndex}
   const filter = `pan=mono|c0=c${channelIndex}`;
 
+  log(`Extracting channel ${channelIndex} from ${flacPath} to ${outputPath}`);
+
   const result = await $`ffmpeg -y -i ${flacPath} -af ${filter} -c:a flac ${outputPath}`.quiet();
 
   if (result.exitCode !== 0) {
-    throw new Error(`Failed to extract channel ${channelIndex} from ${flacPath}: ${result.stderr}`);
+    const stderr = result.stderr.toString();
+    log(`ffmpeg stderr: ${stderr}`);
+    throw new Error(`Failed to extract channel ${channelIndex} from ${flacPath}: exit code ${result.exitCode}, stderr: ${stderr}`);
   }
 }
 
 /**
  * Create a concat file for ffmpeg
+ * Uses absolute paths to avoid path resolution issues
  */
 async function createConcatFile(filePaths: string[], concatFilePath: string): Promise<void> {
-  const content = filePaths.map((p) => `file '${p}'`).join("\n");
+  // Use absolute paths to avoid issues with ffmpeg's path resolution
+  const content = filePaths.map((p) => `file '${resolve(p)}'`).join("\n");
   await writeFile(concatFilePath, content);
 }
 
@@ -142,11 +148,15 @@ async function concatenateAndEncodeToMp3(
   const concatFile = join(tempDir, "concat.txt");
   await createConcatFile(inputFiles, concatFile);
 
+  log(`Encoding MP3: ${inputFiles.length} files -> ${outputPath}`);
+
   // Concatenate and encode to MP3 in one step
   const result = await $`ffmpeg -y -f concat -safe 0 -i ${concatFile} -c:a libmp3lame -b:a ${config.mp3Bitrate} ${outputPath}`.quiet();
 
   if (result.exitCode !== 0) {
-    throw new Error(`Failed to encode MP3: ${result.stderr}`);
+    const stderr = result.stderr.toString();
+    log(`MP3 encode failed: ${stderr}`);
+    throw new Error(`Failed to encode MP3: exit code ${result.exitCode}, stderr: ${stderr}`);
   }
 
   // Clean up concat file
