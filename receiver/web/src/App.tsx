@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { Route, Switch, useRoute, useLocation, Link } from 'wouter'
+import WaveSurfer from 'wavesurfer.js'
 
 // Types
 interface Session {
@@ -137,38 +138,79 @@ function SessionsList({
 }
 
 function AudioPlayer({ channel, sessionId }: { channel: Channel; sessionId: string }) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const wavesurferRef = useRef<WaveSurfer | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
-  const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null)
+  const [isReady, setIsReady] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [duration, setDuration] = useState(0)
 
   // Construct audio URL - use S3 URL if available, otherwise local path via API
   const audioUrl = channel.url || `${API_BASE}/api/sessions/${sessionId}/channels/${channel.channelNumber}/audio`
 
+  const initWaveSurfer = useCallback(() => {
+    if (!containerRef.current || wavesurferRef.current) return
+
+    setIsLoading(true)
+
+    const ws = WaveSurfer.create({
+      container: containerRef.current,
+      waveColor: '#64748b',
+      progressColor: '#10b981',
+      cursorColor: '#f8fafc',
+      cursorWidth: 2,
+      barWidth: 2,
+      barGap: 1,
+      barRadius: 2,
+      height: 60,
+      normalize: true,
+      url: audioUrl,
+    })
+
+    ws.on('ready', () => {
+      setIsReady(true)
+      setIsLoading(false)
+      setDuration(ws.getDuration())
+    })
+
+    ws.on('play', () => setIsPlaying(true))
+    ws.on('pause', () => setIsPlaying(false))
+    ws.on('finish', () => setIsPlaying(false))
+    ws.on('timeupdate', (time) => setCurrentTime(time))
+    ws.on('error', (err) => {
+      console.error('WaveSurfer error:', err)
+      setIsLoading(false)
+    })
+
+    wavesurferRef.current = ws
+  }, [audioUrl])
+
   useEffect(() => {
     return () => {
-      if (audioElement) {
-        audioElement.pause()
+      if (wavesurferRef.current) {
+        wavesurferRef.current.destroy()
+        wavesurferRef.current = null
       }
     }
-  }, [audioElement])
+  }, [])
 
-  const togglePlay = () => {
-    if (!audioElement) {
-      const audio = new Audio(audioUrl)
-      audio.onended = () => setIsPlaying(false)
-      audio.onerror = () => {
-        console.error('Audio error')
-        setIsPlaying(false)
-      }
-      setAudioElement(audio)
-      audio.play()
-      setIsPlaying(true)
-    } else if (isPlaying) {
-      audioElement.pause()
-      setIsPlaying(false)
-    } else {
-      audioElement.play()
-      setIsPlaying(true)
+  const handlePlayPause = () => {
+    if (!wavesurferRef.current) {
+      initWaveSurfer()
+      return
     }
+    wavesurferRef.current.playPause()
+  }
+
+  const formatTime = (seconds: number): string => {
+    const h = Math.floor(seconds / 3600)
+    const m = Math.floor((seconds % 3600) / 60)
+    const s = Math.floor(seconds % 60)
+    if (h > 0) {
+      return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+    }
+    return `${m}:${s.toString().padStart(2, '0')}`
   }
 
   return (
@@ -178,12 +220,45 @@ function AudioPlayer({ channel, sessionId }: { channel: Channel; sessionId: stri
         <span className="text-sm text-slate-400">{formatDuration(channel.durationSeconds)}</span>
         <span className="text-sm text-slate-400">{formatBytes(channel.fileSize)}</span>
       </div>
-      <div className="flex gap-2">
+
+      {/* Waveform container */}
+      <div
+        ref={containerRef}
+        className={`w-full rounded bg-slate-900 ${!isReady && !isLoading ? 'h-[60px] flex items-center justify-center' : ''}`}
+      >
+        {!isReady && !isLoading && (
+          <span className="text-slate-500 text-sm">Click play to load waveform</span>
+        )}
+      </div>
+
+      {/* Time display */}
+      {isReady && (
+        <div className="flex justify-between text-xs text-slate-400">
+          <span>{formatTime(currentTime)}</span>
+          <span>{formatTime(duration)}</span>
+        </div>
+      )}
+
+      {/* Controls */}
+      <div className="flex gap-2 items-center">
         <button
-          onClick={togglePlay}
-          className="bg-emerald-500 text-white px-4 py-2 rounded border-none text-sm font-medium cursor-pointer hover:bg-emerald-600 transition-colors"
+          onClick={handlePlayPause}
+          disabled={isLoading}
+          className="bg-emerald-500 text-white px-4 py-2 rounded border-none text-sm font-medium cursor-pointer hover:bg-emerald-600 transition-colors disabled:bg-slate-600 disabled:cursor-wait flex items-center gap-2"
         >
-          {isPlaying ? 'Pause' : 'Play'}
+          {isLoading ? (
+            <>
+              <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+              Loading...
+            </>
+          ) : isPlaying ? (
+            'Pause'
+          ) : (
+            'Play'
+          )}
         </button>
         {channel.url && (
           <a
@@ -195,15 +270,6 @@ function AudioPlayer({ channel, sessionId }: { channel: Channel; sessionId: stri
           </a>
         )}
       </div>
-      {audioElement && (
-        <audio
-          src={audioUrl}
-          controls
-          className="w-full mt-2 h-10"
-          onPlay={() => setIsPlaying(true)}
-          onPause={() => setIsPlaying(false)}
-        />
-      )}
     </div>
   )
 }
