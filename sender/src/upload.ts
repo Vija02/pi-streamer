@@ -16,6 +16,15 @@ const uploadQueue: UploadQueueItem[] = [];
 let uploadQueueRunning = false;
 
 /**
+ * Extract channel group from filename
+ * e.g., "segment_00_ch01-06.flac" -> "ch01-06"
+ */
+function extractChannelGroup(filename: string): string | undefined {
+  const match = filename.match(/(ch\d+-\d+)/);
+  return match ? match[1] : undefined;
+}
+
+/**
  * Upload a single file to the server
  */
 async function uploadFile(
@@ -34,15 +43,25 @@ async function uploadFile(
     const ext = filePath.split(".").pop()?.toLowerCase();
     const contentType = ext === "flac" ? "audio/flac" : "audio/wav";
 
+    // Extract channel group from filename (e.g., "segment_00_ch01-06.flac" -> "ch01-06")
+    const channelGroup = extractChannelGroup(fileName || "");
+
+    const headers: Record<string, string> = {
+      "Content-Type": contentType,
+      "X-Session-ID": sessionId,
+      "X-Segment-Number": String(segmentNumber),
+      "X-Sample-Rate": String(config.sampleRate),
+      "X-Channels": String(config.channels),
+    };
+
+    // Add channel group header if present
+    if (channelGroup) {
+      headers["X-Channel-Group"] = channelGroup;
+    }
+
     const response = await fetch(config.streamUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": contentType,
-        "X-Session-ID": sessionId,
-        "X-Segment-Number": String(segmentNumber),
-        "X-Sample-Rate": String(config.sampleRate),
-        "X-Channels": String(config.channels),
-      },
+      headers,
       body: fileData,
     });
 
