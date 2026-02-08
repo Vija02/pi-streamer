@@ -10,8 +10,14 @@ services:
       - ./received:/app/received
     environment:
       - PORT=3000
+    networks:
+      - caddy
     labels:
       caddy: recordings.michaelsalim.co.uk
       caddy.reverse_proxy: "{{upstreams 3000}}"
       caddy.reverse_proxy.transport: "http"
       caddy.request_body.max_size: "1GB"
+
+networks:
+  caddy:
+    external: true
