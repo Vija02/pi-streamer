@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react'
-import './App.css'
 
 // Types
 interface Session {
@@ -57,25 +56,18 @@ function formatDate(dateStr: string): string {
   return new Date(dateStr).toLocaleString()
 }
 
+const statusColors: Record<Session['status'], string> = {
+  receiving: 'bg-blue-500',
+  complete: 'bg-amber-500',
+  processing: 'bg-violet-500',
+  processed: 'bg-emerald-500',
+  failed: 'bg-red-500',
+}
+
 function StatusBadge({ status }: { status: Session['status'] }) {
-  const colors: Record<Session['status'], string> = {
-    receiving: '#3b82f6',
-    complete: '#f59e0b',
-    processing: '#8b5cf6',
-    processed: '#10b981',
-    failed: '#ef4444',
-  }
   return (
     <span
-      style={{
-        backgroundColor: colors[status],
-        color: 'white',
-        padding: '2px 8px',
-        borderRadius: '4px',
-        fontSize: '12px',
-        fontWeight: 'bold',
-        textTransform: 'uppercase',
-      }}
+      className={`${statusColors[status]} text-white px-2 py-0.5 rounded text-xs font-bold uppercase`}
     >
       {status}
     </span>
@@ -94,28 +86,39 @@ function SessionsList({
   onRefresh: () => void
 }) {
   return (
-    <div className="sessions-list">
-      <div className="sessions-header">
-        <h2>Sessions</h2>
-        <button onClick={onRefresh} className="refresh-btn">
+    <div className="w-80 bg-slate-800 border-r border-slate-700 flex flex-col overflow-hidden">
+      <div className="p-4 flex justify-between items-center border-b border-slate-700">
+        <h2 className="text-base font-semibold">Sessions</h2>
+        <button
+          onClick={onRefresh}
+          className="bg-slate-700 text-slate-200 border-none px-3 py-1.5 rounded cursor-pointer text-sm hover:bg-slate-600 transition-colors"
+        >
           Refresh
         </button>
       </div>
       {sessions.length === 0 ? (
-        <p className="empty-message">No sessions yet</p>
+        <p className="text-slate-500 p-4 text-center">No sessions yet</p>
       ) : (
-        <ul>
+        <ul className="list-none overflow-y-auto flex-1">
           {sessions.map((session) => (
             <li
               key={session.id}
-              className={`session-item ${selectedSessionId === session.id ? 'selected' : ''}`}
+              className={`p-3 cursor-pointer border-b border-slate-700 transition-colors hover:bg-slate-700 ${
+                selectedSessionId === session.id ? 'bg-blue-500' : ''
+              }`}
               onClick={() => onSelectSession(session.id)}
             >
-              <div className="session-item-header">
-                <span className="session-id">{session.id}</span>
+              <div className="flex justify-between items-center mb-2">
+                <span className="font-medium text-sm overflow-hidden text-ellipsis whitespace-nowrap max-w-[180px]">
+                  {session.id}
+                </span>
                 <StatusBadge status={session.status} />
               </div>
-              <div className="session-item-meta">
+              <div
+                className={`flex gap-3 text-xs ${
+                  selectedSessionId === session.id ? 'text-blue-200' : 'text-slate-400'
+                }`}
+              >
                 <span>{formatDate(session.created_at)}</span>
                 <span>{session.segmentCount} segments</span>
                 {session.status === 'processed' && (
@@ -166,18 +169,25 @@ function AudioPlayer({ channel, sessionId }: { channel: Channel; sessionId: stri
   }
 
   return (
-    <div className="channel-item">
-      <div className="channel-info">
-        <span className="channel-number">Channel {channel.channelNumber}</span>
-        <span className="channel-duration">{formatDuration(channel.durationSeconds)}</span>
-        <span className="channel-size">{formatBytes(channel.fileSize)}</span>
+    <div className="bg-slate-800 p-4 rounded-lg flex flex-col gap-3">
+      <div className="flex items-center gap-4">
+        <span className="font-semibold text-base min-w-[100px]">Channel {channel.channelNumber}</span>
+        <span className="text-sm text-slate-400">{formatDuration(channel.durationSeconds)}</span>
+        <span className="text-sm text-slate-400">{formatBytes(channel.fileSize)}</span>
       </div>
-      <div className="channel-controls">
-        <button onClick={togglePlay} className="play-btn">
+      <div className="flex gap-2">
+        <button
+          onClick={togglePlay}
+          className="bg-emerald-500 text-white px-4 py-2 rounded border-none text-sm font-medium cursor-pointer hover:bg-emerald-600 transition-colors"
+        >
           {isPlaying ? 'Pause' : 'Play'}
         </button>
         {channel.url && (
-          <a href={channel.url} download className="download-btn">
+          <a
+            href={channel.url}
+            download
+            className="bg-slate-700 text-slate-200 px-4 py-2 rounded text-sm font-medium no-underline inline-block text-center hover:bg-slate-600 transition-colors"
+          >
             Download
           </a>
         )}
@@ -186,7 +196,7 @@ function AudioPlayer({ channel, sessionId }: { channel: Channel; sessionId: stri
         <audio
           src={audioUrl}
           controls
-          className="audio-element"
+          className="w-full mt-2 h-10"
           onPlay={() => setIsPlaying(true)}
           onPause={() => setIsPlaying(false)}
         />
@@ -207,47 +217,47 @@ function SessionDetail({
   isLoading: boolean
 }) {
   return (
-    <div className="session-detail">
-      <div className="session-detail-header">
-        <h2>{session.id}</h2>
+    <div className="max-w-4xl">
+      <div className="flex items-center gap-4 mb-6">
+        <h2 className="text-2xl font-semibold">{session.id}</h2>
         <StatusBadge status={session.status} />
       </div>
 
-      <div className="session-meta">
-        <div className="meta-item">
-          <label>Created</label>
-          <span>{formatDate(session.created_at)}</span>
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-4 bg-slate-800 p-4 rounded-lg mb-6">
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-slate-500 uppercase">Created</label>
+          <span className="text-sm font-medium">{formatDate(session.created_at)}</span>
         </div>
-        <div className="meta-item">
-          <label>Sample Rate</label>
-          <span>{session.sample_rate} Hz</span>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-slate-500 uppercase">Sample Rate</label>
+          <span className="text-sm font-medium">{session.sample_rate} Hz</span>
         </div>
-        <div className="meta-item">
-          <label>Channels</label>
-          <span>{session.channels}</span>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-slate-500 uppercase">Channels</label>
+          <span className="text-sm font-medium">{session.channels}</span>
         </div>
-        <div className="meta-item">
-          <label>Segments</label>
-          <span>{session.segmentCount}</span>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-slate-500 uppercase">Segments</label>
+          <span className="text-sm font-medium">{session.segmentCount}</span>
         </div>
-        <div className="meta-item">
-          <label>Raw Size</label>
-          <span>{formatBytes(session.totalSegmentSize)}</span>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-slate-500 uppercase">Raw Size</label>
+          <span className="text-sm font-medium">{formatBytes(session.totalSegmentSize)}</span>
         </div>
         {session.processedChannelCount > 0 && (
-          <div className="meta-item">
-            <label>Processed Size</label>
-            <span>{formatBytes(session.totalProcessedSize)}</span>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-slate-500 uppercase">Processed Size</label>
+            <span className="text-sm font-medium">{formatBytes(session.totalProcessedSize)}</span>
           </div>
         )}
       </div>
 
       {(session.status === 'receiving' || session.status === 'complete' || session.status === 'failed') && (
-        <div className="session-actions">
+        <div className="mb-6">
           <button
             onClick={onTriggerProcess}
             disabled={isLoading}
-            className="process-btn"
+            className="bg-blue-500 text-white border-none px-5 py-2.5 rounded-md text-sm font-medium cursor-pointer hover:bg-blue-600 transition-colors disabled:bg-slate-500 disabled:cursor-not-allowed"
           >
             {isLoading ? 'Processing...' : 'Process Now'}
           </button>
@@ -255,15 +265,15 @@ function SessionDetail({
       )}
 
       {session.status === 'processing' && (
-        <div className="processing-message">
+        <div className="bg-violet-600 text-white px-4 py-3 rounded-md mb-6">
           Processing audio... This may take a few minutes.
         </div>
       )}
 
       {session.status === 'processed' && channels.length > 0 && (
-        <div className="channels-section">
-          <h3>Audio Channels</h3>
-          <div className="channels-list">
+        <div>
+          <h3 className="text-lg font-semibold mb-4">Audio Channels</h3>
+          <div className="flex flex-col gap-3">
             {channels.map((channel) => (
               <AudioPlayer key={channel.channelNumber} channel={channel} sessionId={session.id} />
             ))}
@@ -272,7 +282,7 @@ function SessionDetail({
       )}
 
       {session.status === 'processed' && channels.length === 0 && (
-        <div className="empty-message">No processed channels found</div>
+        <div className="text-slate-500 p-4 text-center">No processed channels found</div>
       )}
     </div>
   )
@@ -351,14 +361,16 @@ function App() {
   const selectedSession = sessions.find((s) => s.id === selectedSessionId)
 
   return (
-    <div className="app">
-      <header className="app-header">
-        <h1>XR18 Audio Sessions</h1>
+    <div className="min-h-screen flex flex-col">
+      <header className="bg-slate-800 px-6 py-4 border-b border-slate-700">
+        <h1 className="text-xl font-semibold text-slate-50">XR18 Audio Sessions</h1>
       </header>
 
-      {error && <div className="error-banner">{error}</div>}
+      {error && (
+        <div className="bg-red-600 text-white px-6 py-3 text-center">{error}</div>
+      )}
 
-      <div className="app-content">
+      <div className="flex flex-1 overflow-hidden">
         <SessionsList
           sessions={sessions}
           onSelectSession={setSelectedSessionId}
@@ -366,7 +378,7 @@ function App() {
           onRefresh={fetchSessions}
         />
 
-        <div className="main-panel">
+        <div className="flex-1 overflow-y-auto p-6">
           {selectedSession ? (
             <SessionDetail
               session={selectedSession}
@@ -375,7 +387,7 @@ function App() {
               isLoading={isLoading}
             />
           ) : (
-            <div className="empty-state">
+            <div className="flex items-center justify-center h-full text-slate-500 text-base">
               <p>Select a session to view details</p>
             </div>
           )}
