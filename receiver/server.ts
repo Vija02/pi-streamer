@@ -795,6 +795,14 @@ async function handleRequest(req: Request): Promise<Response> {
       response = await handleHealthCheck();
     } else if (path === "/api/sessions" && method === "GET") {
       response = await handleListSessions();
+    } else if (path.match(/^\/api\/sessions\/[^/]+\/channels\/\d+\/audio$/) && (method === "GET" || method === "HEAD")) {
+      // Serve audio file: /api/sessions/:sessionId/channels/:channelNumber/audio
+      // This must come before the generic session routes!
+      // Support both GET and HEAD (browsers send HEAD for audio preload)
+      const parts = path.split("/");
+      const sessionId = parts[3];
+      const channelNumber = parseInt(parts[5], 10);
+      response = await handleServeAudio(sessionId, channelNumber);
     } else if (path.startsWith("/api/sessions/") && path.endsWith("/channels") && method === "GET") {
       const sessionId = path.replace("/api/sessions/", "").replace("/channels", "");
       response = await handleGetSessionChannels(sessionId);
@@ -806,12 +814,6 @@ async function handleRequest(req: Request): Promise<Response> {
       response = await handleListSessions();
     } else if (path === "/retry-failed" && method === "POST") {
       response = await handleRetryFailed();
-    } else if (path.match(/^\/api\/sessions\/[^/]+\/channels\/\d+\/audio$/) && method === "GET") {
-      // Serve audio file: /api/sessions/:sessionId/channels/:channelNumber/audio
-      const parts = path.split("/");
-      const sessionId = parts[3];
-      const channelNumber = parseInt(parts[5], 10);
-      response = await handleServeAudio(sessionId, channelNumber);
     } else {
       // Try to serve static files from web/dist
       const staticResponse = await serveStaticFile(path);
