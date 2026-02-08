@@ -27,6 +27,12 @@ import {
 
 const config = {
   mp3Bitrate: process.env.MP3_BITRATE || "320k",
+  mp3Quality: Number(process.env.MP3_VBR_QUALITY) || 2, // VBR quality 0-9 (0=best, 9=worst), default 2 (~190kbps for normal audio)
+  useVbr: process.env.MP3_USE_VBR !== "false", // Use VBR by default for better compression
+  silenceThreshold: Number(process.env.SILENCE_THRESHOLD_DB) || -50, // dB threshold for silence detection
+  silenceMinDuration: Number(process.env.SILENCE_MIN_DURATION) || 0.5, // Minimum silence duration in seconds
+  quietChannelThreshold: Number(process.env.QUIET_CHANNEL_THRESHOLD_DB) || -40, // If max volume is below this, use lower quality
+  quietChannelQuality: Number(process.env.QUIET_CHANNEL_VBR_QUALITY) || 7, // VBR quality for quiet channels (lower quality = smaller file)
   keepFlacAfterProcess: process.env.KEEP_FLAC_AFTER_PROCESS !== "false",
   s3: {
     enabled: process.env.S3_ENABLED !== "false",
@@ -55,6 +61,46 @@ const s3Client = config.s3.enabled
 
 function log(message: string, ...args: unknown[]) {
   console.log(`[Processor] [${new Date().toISOString()}] ${message}`, ...args);
+}
+
+// =============================================================================
+// AUDIO ANALYSIS
+// =============================================================================
+
+interface AudioStats {
+  maxVolume: number; // in dB (0 = full scale, negative = quieter)
+  meanVolume: number; // in dB
+  isQuiet: boolean; // true if audio is mostly quiet/silent
+}
+
+/**
+ * Analyze audio file to get volume statistics
+ * Returns max and mean volume in dB, and whether the audio is quiet
+ */
+async function analyzeAudio(filePath: string): Promise<AudioStats> {
+  try {
+    // Use ffmpeg's volumedetect filter
+    const result = await $`ffmpeg -i ${filePath} -af volumedetect -f null /dev/null`.quiet();
+    
+    const stderr = result.stderr.toString();
+    
+    // Parse max_volume and mean_volume from output
+    // Example: [Parsed_volumedetect_0 @ 0x...] max_volume: -12.3 dB
+    const maxMatch = stderr.match(/max_volume:\s*([-\d.]+)\s*dB/);
+    const meanMatch = stderr.match(/mean_volume:\s*([-\d.]+)\s*dB/);
+    
+    const maxVolume = maxMatch ? parseFloat(maxMatch[1]) : 0;
+    const meanVolume = meanMatch ? parseFloat(meanMatch[1]) : -100;
+    
+    // Consider audio quiet if max volume is below threshold
+    const isQuiet = maxVolume < config.quietChannelThreshold;
+    
+    return { maxVolume, meanVolume, isQuiet };
+  } catch (err) {
+    log(`Failed to analyze audio: ${err}`);
+    // Default to non-quiet if analysis fails
+    return { maxVolume: 0, meanVolume: -20, isQuiet: false };
+  }
 }
 
 // =============================================================================
@@ -139,19 +185,41 @@ async function createConcatFile(filePaths: string[], concatFilePath: string): Pr
 
 /**
  * Concatenate audio files and encode to MP3
+ * Uses VBR encoding by default with quality adjustment for quiet channels
  */
 async function concatenateAndEncodeToMp3(
   inputFiles: string[],
   outputPath: string,
-  tempDir: string
+  tempDir: string,
+  audioStats?: AudioStats
 ): Promise<{ fileSize: number; durationSeconds: number }> {
   const concatFile = join(tempDir, "concat.txt");
   await createConcatFile(inputFiles, concatFile);
 
-  log(`Encoding MP3: ${inputFiles.length} files -> ${outputPath}`);
+  // Determine encoding quality based on audio content
+  let encodingArgs: string[];
+  
+  if (config.useVbr) {
+    // Use VBR encoding - much more efficient for varying audio content
+    // Quality 0 = ~245 kbps, 2 = ~190 kbps, 4 = ~165 kbps, 6 = ~130 kbps, 9 = ~65 kbps
+    const vbrQuality = audioStats?.isQuiet 
+      ? config.quietChannelQuality  // Use lower quality for quiet channels
+      : config.mp3Quality;
+    
+    if (audioStats?.isQuiet) {
+      log(`  Quiet channel detected (max: ${audioStats.maxVolume.toFixed(1)}dB), using VBR quality ${vbrQuality}`);
+    }
+    
+    encodingArgs = ["-q:a", String(vbrQuality)];
+  } else {
+    // Use CBR encoding (original behavior)
+    encodingArgs = ["-b:a", config.mp3Bitrate];
+  }
+
+  log(`Encoding MP3: ${inputFiles.length} files -> ${outputPath} (${config.useVbr ? `VBR q${encodingArgs[1]}` : `CBR ${config.mp3Bitrate}`})`);
 
   // Concatenate and encode to MP3 in one step
-  const result = await $`ffmpeg -y -f concat -safe 0 -i ${concatFile} -c:a libmp3lame -b:a ${config.mp3Bitrate} ${outputPath}`.quiet();
+  const result = await $`ffmpeg -y -f concat -safe 0 -i ${concatFile} -c:a libmp3lame ${encodingArgs} ${outputPath}`.quiet();
 
   if (result.exitCode !== 0) {
     const stderr = result.stderr.toString();
@@ -285,13 +353,22 @@ async function processChannel(
     return;
   }
 
+  // Analyze the first extracted file to determine if channel is quiet
+  // This helps us choose appropriate encoding quality
+  let audioStats: AudioStats | undefined;
+  if (extractedFiles.length > 0) {
+    audioStats = await analyzeAudio(extractedFiles[0]);
+    log(`  Channel ${channelNumber} audio stats: max=${audioStats.maxVolume.toFixed(1)}dB, mean=${audioStats.meanVolume.toFixed(1)}dB, quiet=${audioStats.isQuiet}`);
+  }
+
   // Concatenate and encode to MP3
   const mp3Path = join(outputDir, `channel_${String(channelNumber).padStart(2, "0")}.mp3`);
 
   const { fileSize, durationSeconds } = await concatenateAndEncodeToMp3(
     extractedFiles,
     mp3Path,
-    tempDir
+    tempDir,
+    audioStats
   );
 
   log(`Created MP3: ${mp3Path} (${(fileSize / 1024 / 1024).toFixed(2)} MB, ${durationSeconds.toFixed(1)}s)`);
