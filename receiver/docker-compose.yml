@@ -1,0 +1,17 @@
+services:
+  receiver:
+    image: ghcr.io/vija02/pi-streamer-receiver:main
+    restart: unless-stopped
+    container_name: pi-streamer-receiver
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data
+      - ./received:/app/received
+    environment:
+      - PORT=3000
+    labels:
+      caddy: recordings.michaelsalim.co.uk
+      caddy.reverse_proxy: "{{upstreams 3000}}"
+      caddy.reverse_proxy.transport: "http"
+      caddy.request_body.max_size: "1GB"
