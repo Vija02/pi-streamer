@@ -1,7 +1,7 @@
 /**
  * JACK Audio utilities
  */
-import { $, spawn } from "bun";
+import { $, spawn, type Subprocess } from "bun";
 import { getConfig } from "./config";
 import { jackLogger as logger } from "./logger";
 
@@ -15,6 +15,10 @@ const JACK_CONFIG = {
   autoStart: process.env.JACK_AUTO_START !== "false", // Auto-start by default
   startupWaitMs: Number(process.env.JACK_STARTUP_WAIT_MS) || 3000, // Wait for JACK to initialize
 };
+
+// Track the JACK server process if we started it
+let jackProcess: Subprocess<"ignore", "ignore", "pipe"> | null = null;
+let jackWasAutoStarted = false;
 
 /**
  * Check if JACK server is running
@@ -59,8 +63,8 @@ export async function startJackServer(): Promise<{ ok: boolean; alreadyRunning?:
 
     logger.debug({ command: `jackd ${args.join(" ")}` }, "JACK command");
 
-    // Start jackd in background (detached)
-    // We use spawn with stdio: "ignore" so it runs independently
+    // Start jackd in background
+    // We track this process so we can kill it on shutdown
     const proc = spawn(["jackd", ...args], {
       stdout: "ignore",
       stderr: "pipe", // Capture stderr for error detection
@@ -72,6 +76,9 @@ export async function startJackServer(): Promise<{ ok: boolean; alreadyRunning?:
     // Check if JACK is now running
     if (await isJackRunning()) {
       logger.info("JACK server started successfully");
+      // Store the process reference so we can clean it up later
+      jackProcess = proc;
+      jackWasAutoStarted = true;
       return { ok: true };
     }
 
@@ -214,4 +221,47 @@ export async function getCapturePorts(): Promise<string[]> {
   return ports.filter(
     (p) => p.toLowerCase().includes("capture") || p.includes(":in")
   );
+}
+
+/**
+ * Check if JACK was auto-started by this process
+ */
+export function wasJackAutoStarted(): boolean {
+  return jackWasAutoStarted;
+}
+
+/**
+ * Stop the JACK server if it was auto-started by this process
+ */
+export async function stopJackServer(): Promise<void> {
+  if (!jackProcess || !jackWasAutoStarted) {
+    return;
+  }
+
+  logger.info("Stopping JACK server (was auto-started)");
+  
+  try {
+    jackProcess.kill("SIGTERM");
+    
+    // Wait for the process to exit with a timeout
+    const exitPromise = jackProcess.exited;
+    const timeoutPromise = new Promise<number>((resolve) => 
+      setTimeout(() => resolve(-1), 5000)
+    );
+    
+    const exitCode = await Promise.race([exitPromise, timeoutPromise]);
+    
+    if (exitCode === -1) {
+      // Timeout - force kill
+      logger.warn("JACK server did not exit gracefully, force killing");
+      jackProcess.kill("SIGKILL");
+    } else {
+      logger.info({ exitCode }, "JACK server stopped");
+    }
+  } catch (err) {
+    logger.warn({ err }, "Error stopping JACK server");
+  } finally {
+    jackProcess = null;
+    jackWasAutoStarted = false;
+  }
 }

@@ -13,7 +13,7 @@ import { $, spawn, type Subprocess } from "bun"
 import { join } from "path"
 import { getConfig } from "./config"
 import { recordingLogger as logger } from "./logger"
-import { checkJackSetup, getSourcePorts } from "./jack"
+import { checkJackSetup, getSourcePorts, stopJackServer } from "./jack"
 import { waitForQueueEmpty, getQueueLength } from "./upload"
 import { startWatcher, stopWatcher } from "./watcher"
 
@@ -229,6 +229,9 @@ export async function startRecording(): Promise<void> {
 	if (config.uploadEnabled) {
 		await notifySessionComplete(config.sessionId, config.streamUrl)
 	}
+
+	// Stop JACK server if we auto-started it
+	await stopJackServer()
 
 	logger.info("Recording service finished")
 }
