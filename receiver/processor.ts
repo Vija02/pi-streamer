@@ -450,6 +450,7 @@ async function uploadHlsToS3(
     log(`Uploaded HLS playlist: ${m3u8Key}`);
 
     // Upload all .ts segments
+    log(`Uploading ${segmentFiles.length} HLS .ts segments for channel ${channelNumber}...`);
     for (const segPath of segmentFiles) {
       const segName = basename(segPath);
       const segKey = `${prefix}${segName}`;
@@ -1177,4 +1178,72 @@ export async function regenerateAllMp3s(sessionId: string): Promise<{
   log(`Regeneration complete: ${successCount}/${results.length} channels succeeded`);
 
   return { success, results };
+}
+
+/**
+ * Regenerate peaks for a single channel from the existing MP3
+ */
+export async function regeneratePeaksForChannel(
+  sessionId: string,
+  channelNumber: number
+): Promise<{ success: boolean; error?: string; peaksUrl?: string }> {
+  log(`Regenerating peaks for session ${sessionId}, channel ${channelNumber}`);
+
+  const session = getSession(sessionId);
+  if (!session) {
+    return { success: false, error: "Session not found" };
+  }
+
+  if (session.status !== "processed") {
+    return { success: false, error: "Session must be in 'processed' status" };
+  }
+
+  const channels = getProcessedChannels(sessionId);
+  const channel = channels.find((c) => c.channel_number === channelNumber);
+  if (!channel) {
+    return { success: false, error: `Channel ${channelNumber} not found` };
+  }
+
+  const sessionDir = join(config.localStorage.dir, sessionId);
+  const mp3Dir = join(sessionDir, "mp3");
+  const peaksDir = join(sessionDir, "peaks");
+
+  await mkdir(peaksDir, { recursive: true });
+
+  const padded = String(channelNumber).padStart(2, "0");
+  let mp3Path = channel.local_path;
+
+  // Check if MP3 exists locally
+  let mp3File = Bun.file(mp3Path);
+  if (!(await mp3File.exists())) {
+    // Try to download from S3 if we have a URL
+    if (channel.s3_url) {
+      try {
+        mp3Path = join(mp3Dir, `channel_${padded}.mp3`);
+        await downloadMp3FromS3(channel.s3_url, mp3Path);
+      } catch (err) {
+        return { success: false, error: `Failed to download MP3 from S3: ${err}` };
+      }
+    } else {
+      return { success: false, error: "MP3 file not found locally and no S3 URL available" };
+    }
+  }
+
+  try {
+    const peaksPath = join(peaksDir, `channel_${padded}_peaks.json`);
+    await generatePeaks(mp3Path, peaksPath);
+    const peaksUrl = await uploadPeaksToS3(peaksPath, sessionId, channelNumber);
+
+    // Update database with new peaks URL
+    if (peaksUrl) {
+      updateProcessedChannelHlsAndPeaks(channel.id, channel.hls_url, peaksUrl);
+    }
+
+    log(`Regenerated peaks for channel ${channelNumber}: ${peaksUrl}`);
+    return { success: true, peaksUrl: peaksUrl || undefined };
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    log(`Failed to regenerate peaks for channel ${channelNumber}: ${errorMsg}`);
+    return { success: false, error: errorMsg };
+  }
 }

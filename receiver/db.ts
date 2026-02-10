@@ -51,6 +51,7 @@ export interface ProcessedChannel {
   file_size: number;
   duration_seconds: number | null;
   is_quiet: number; // 0 = false, 1 = true (SQLite boolean)
+  is_silent: number; // 0 = false, 1 = true (SQLite boolean) - static noise only channels
   created_at: string;
 }
 
@@ -120,6 +121,7 @@ export function initDatabase(): Database {
       file_size INTEGER NOT NULL,
       duration_seconds REAL,
       is_quiet INTEGER DEFAULT 0,
+      is_silent INTEGER DEFAULT 0,
       created_at TEXT NOT NULL,
       FOREIGN KEY (session_id) REFERENCES sessions(id),
       UNIQUE(session_id, channel_number)
@@ -142,6 +144,12 @@ export function initDatabase(): Database {
   try {
     db.run(`ALTER TABLE processed_channels ADD COLUMN is_quiet INTEGER DEFAULT 0`);
     console.log("[DB] Added is_quiet column");
+  } catch {
+    // Column already exists
+  }
+  try {
+    db.run(`ALTER TABLE processed_channels ADD COLUMN is_silent INTEGER DEFAULT 0`);
+    console.log("[DB] Added is_silent column");
   } catch {
     // Column already exists
   }
@@ -360,15 +368,16 @@ export function insertProcessedChannel(
   durationSeconds?: number,
   hlsUrl?: string,
   peaksUrl?: string,
-  isQuiet?: boolean
+  isQuiet?: boolean,
+  isSilent?: boolean
 ): ProcessedChannel {
   const db = getDatabase();
   const now = new Date().toISOString();
 
   db.run(
     `INSERT OR REPLACE INTO processed_channels 
-     (session_id, channel_number, local_path, s3_key, s3_url, hls_url, peaks_url, file_size, duration_seconds, is_quiet, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     (session_id, channel_number, local_path, s3_key, s3_url, hls_url, peaks_url, file_size, duration_seconds, is_quiet, is_silent, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       sessionId,
       channelNumber,
@@ -380,6 +389,7 @@ export function insertProcessedChannel(
       fileSize,
       durationSeconds ?? null,
       isQuiet ? 1 : 0,
+      isSilent ? 1 : 0,
       now,
     ]
   );

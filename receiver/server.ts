@@ -44,6 +44,7 @@ import {
   regenerateHlsAndPeaks,
   regenerateMp3ForChannel,
   regenerateAllMp3s,
+  regeneratePeaksForChannel,
 } from "./processor";
 
 // =============================================================================
@@ -649,6 +650,54 @@ async function handleRegenerateMp3Channel(req: Request): Promise<Response> {
   }
 }
 
+async function handleRegeneratePeaksChannel(req: Request): Promise<Response> {
+  try {
+    const body = await req.json();
+    const sessionId = body.sessionId;
+    const channelNumber = body.channelNumber;
+
+    if (!sessionId) {
+      return new Response(
+        JSON.stringify({ error: "Missing sessionId in request body" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    if (typeof channelNumber !== "number" || channelNumber < 1 || channelNumber > 18) {
+      return new Response(
+        JSON.stringify({ error: "Invalid channelNumber (must be 1-18)" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    log(`Regenerating peaks for session ${sessionId}, channel ${channelNumber}`);
+
+    const result = await regeneratePeaksForChannel(sessionId, channelNumber);
+
+    return new Response(
+      JSON.stringify({
+        success: result.success,
+        sessionId,
+        channelNumber,
+        peaksUrl: result.peaksUrl,
+        error: result.error,
+      }),
+      {
+        status: result.success ? 200 : 400,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+  } catch (err) {
+    return new Response(
+      JSON.stringify({
+        error: "Failed to regenerate peaks",
+        message: err instanceof Error ? err.message : String(err),
+      }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
+    );
+  }
+}
+
 async function handleHealthCheck(): Promise<Response> {
   const sessionManagerStatus = getSessionManagerStatus();
   const hasFfmpeg = await checkFfmpeg();
@@ -755,6 +804,7 @@ async function handleGetSessionChannels(sessionId: string): Promise<Response> {
         fileSize: ch.file_size,
         durationSeconds: ch.duration_seconds,
         isQuiet: ch.is_quiet === 1,
+        isSilent: ch.is_silent === 1,
       })),
     }),
     { status: 200, headers: { "Content-Type": "application/json" } }
@@ -799,15 +849,7 @@ async function handleServeAudio(sessionId: string, channelNumber: number): Promi
 async function handleServePeaks(sessionId: string, channelNumber: number): Promise<Response> {
   const path = await import("path");
 
-  // Check if channel has a peaks_url (redirect to S3)
-  const channels = getProcessedChannels(sessionId);
-  const channel = channels.find((c) => c.channel_number === channelNumber);
-
-  if (channel?.peaks_url) {
-    return Response.redirect(channel.peaks_url, 302);
-  }
-
-  // Try to serve from local file
+  // Try to serve from local file first
   const peaksPath = path.join(
     config.localStorage.dir,
     sessionId,
@@ -817,25 +859,30 @@ async function handleServePeaks(sessionId: string, channelNumber: number): Promi
 
   try {
     const file = Bun.file(peaksPath);
-    if (!(await file.exists())) {
-      return new Response(JSON.stringify({ error: "Peaks file not found" }), {
-        status: 404,
-        headers: { "Content-Type": "application/json" },
+    if (await file.exists()) {
+      return new Response(file, {
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "public, max-age=31536000", // Peaks are immutable
+        },
       });
     }
-
-    return new Response(file, {
-      headers: {
-        "Content-Type": "application/json",
-        "Cache-Control": "public, max-age=31536000", // Peaks are immutable
-      },
-    });
-  } catch (err) {
-    return new Response(JSON.stringify({ error: "Failed to serve peaks" }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    });
+  } catch {
+    // Fall through to S3 redirect
   }
+
+  // Fallback: redirect to S3 if local file doesn't exist
+  const channels = getProcessedChannels(sessionId);
+  const channel = channels.find((c) => c.channel_number === channelNumber);
+
+  if (channel?.peaks_url) {
+    return Response.redirect(channel.peaks_url, 302);
+  }
+
+  return new Response(JSON.stringify({ error: "Peaks file not found" }), {
+    status: 404,
+    headers: { "Content-Type": "application/json" },
+  });
 }
 
 async function handleServeHls(sessionId: string, channelNumber: number, filename: string): Promise<Response> {
@@ -1036,6 +1083,8 @@ async function handleRequest(req: Request): Promise<Response> {
       response = await handleRegenerateMp3(req);
     } else if (path === "/session/regenerate-mp3-channel" && method === "POST") {
       response = await handleRegenerateMp3Channel(req);
+    } else if (path === "/session/regenerate-peaks-channel" && method === "POST") {
+      response = await handleRegeneratePeaksChannel(req);
     } else if (path === "/health" && method === "GET") {
       response = await handleHealthCheck();
     } else if (path === "/api/sessions" && method === "GET") {
@@ -1088,6 +1137,7 @@ async function handleRequest(req: Request): Promise<Response> {
               "POST /session/regenerate": "Regenerate HLS/peaks for a processed session",
               "POST /session/regenerate-mp3": "Regenerate all MP3s for a session (with normalization)",
               "POST /session/regenerate-mp3-channel": "Regenerate MP3 for a single channel",
+              "POST /session/regenerate-peaks-channel": "Regenerate peaks for a single channel",
               "GET /health": "Health check & queue status",
               "GET /api/sessions": "List all sessions with stats",
               "GET /api/sessions/:id": "Get session details and processed channels",

@@ -147,12 +147,16 @@ function AudioPlayer({
   channel, 
   sessionId,
   isRegenerating,
+  isRegeneratingPeaks,
   onRegenerate,
+  onRegeneratePeaks,
 }: { 
   channel: Channel
   sessionId: string
   isRegenerating?: boolean
+  isRegeneratingPeaks?: boolean
   onRegenerate?: () => void
+  onRegeneratePeaks?: () => void
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -165,8 +169,8 @@ function AudioPlayer({
   const [duration, setDuration] = useState(channel.durationSeconds || 0)
   const [error, setError] = useState<string | null>(null)
 
-  // URLs
-  const peaksUrl = channel.peaksUrl || `${API_BASE}/api/sessions/${sessionId}/channels/${channel.channelNumber}/peaks`
+  // URLs - always use proxy URLs for peaks and audio to avoid CORS issues
+  const peaksUrl = `${API_BASE}/api/sessions/${sessionId}/channels/${channel.channelNumber}/peaks`
   const hlsUrl = channel.hlsUrl
   const mp3Url = channel.url || `${API_BASE}/api/sessions/${sessionId}/channels/${channel.channelNumber}/audio`
 
@@ -357,18 +361,34 @@ function AudioPlayer({
             )}
             {isRegenerating ? 'Regenerating...' : 'Regenerate MP3'}
           </SimpleDropdownItem>
+          <SimpleDropdownItem 
+            onClick={onRegeneratePeaks}
+            disabled={isRegeneratingPeaks}
+          >
+            {isRegeneratingPeaks ? (
+              <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+              </svg>
+            )}
+            {isRegeneratingPeaks ? 'Regenerating...' : 'Regenerate Peaks'}
+          </SimpleDropdownItem>
         </SimpleDropdown>
       </div>
 
       {/* Regenerating overlay */}
-      {isRegenerating && (
+      {(isRegenerating || isRegeneratingPeaks) && (
         <div className="absolute inset-0 bg-slate-900/80 flex items-center justify-center rounded-lg">
           <span className="flex items-center gap-2 text-sm">
             <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
             </svg>
-            Regenerating...
+            {isRegeneratingPeaks ? 'Regenerating Peaks...' : 'Regenerating...'}
           </span>
         </div>
       )}
@@ -383,10 +403,12 @@ function SessionDetail({
   onRegenerateHlsPeaks,
   onRegenerateAllMp3s,
   onRegenerateChannelMp3,
+  onRegenerateChannelPeaks,
   isLoading,
   isRegeneratingHlsPeaks,
   isRegeneratingAllMp3s,
   regeneratingChannels,
+  regeneratingPeaksChannels,
 }: {
   session: Session
   channels: Channel[]
@@ -394,17 +416,19 @@ function SessionDetail({
   onRegenerateHlsPeaks: () => void
   onRegenerateAllMp3s: () => void
   onRegenerateChannelMp3: (channelNumber: number) => void
+  onRegenerateChannelPeaks: (channelNumber: number) => void
   isLoading: boolean
   isRegeneratingHlsPeaks: boolean
   isRegeneratingAllMp3s: boolean
   regeneratingChannels: Set<number>
+  regeneratingPeaksChannels: Set<number>
 }) {
   // Check if any channels are missing HLS or peaks
   const channelsMissingHlsOrPeaks = channels.filter(
     (ch) => !ch.hlsUrl || !ch.peaksUrl
   ).length
   
-  const isAnyRegenerating = isRegeneratingHlsPeaks || isRegeneratingAllMp3s || regeneratingChannels.size > 0
+  const isAnyRegenerating = isRegeneratingHlsPeaks || isRegeneratingAllMp3s || regeneratingChannels.size > 0 || regeneratingPeaksChannels.size > 0
   return (
     <div className="max-w-4xl">
       {/* Back button for mobile */}
@@ -527,7 +551,9 @@ function SessionDetail({
                 channel={channel} 
                 sessionId={session.id}
                 isRegenerating={regeneratingChannels.has(channel.channelNumber)}
+                isRegeneratingPeaks={regeneratingPeaksChannels.has(channel.channelNumber)}
                 onRegenerate={() => onRegenerateChannelMp3(channel.channelNumber)}
+                onRegeneratePeaks={() => onRegenerateChannelPeaks(channel.channelNumber)}
               />
             ))}
           </div>
@@ -555,6 +581,7 @@ function SessionPage({
   const [isRegeneratingHlsPeaks, setIsRegeneratingHlsPeaks] = useState(false)
   const [isRegeneratingAllMp3s, setIsRegeneratingAllMp3s] = useState(false)
   const [regeneratingChannels, setRegeneratingChannels] = useState<Set<number>>(new Set())
+  const [regeneratingPeaksChannels, setRegeneratingPeaksChannels] = useState<Set<number>>(new Set())
   const [, setLocation] = useLocation()
 
   const session = sessions.find((s) => s.id === sessionId)
@@ -689,6 +716,39 @@ function SessionPage({
     }
   }
 
+  // Regenerate single channel peaks
+  const regenerateChannelPeaks = async (channelNumber: number) => {
+    if (!sessionId) return
+
+    setRegeneratingPeaksChannels(prev => new Set(prev).add(channelNumber))
+    
+    try {
+      const response = await fetch(`${API_BASE}/session/regenerate-peaks-channel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, channelNumber }),
+      })
+      const result = await response.json()
+      
+      if (result.success) {
+        // Refresh channels to get new data
+        await fetchChannels(sessionId)
+      } else {
+        console.error('Channel peaks regeneration failed:', result.error)
+        alert(`Failed to regenerate peaks for channel ${channelNumber}: ${result.error || 'Unknown error'}`)
+      }
+    } catch (err) {
+      console.error('Failed to regenerate channel peaks:', err)
+      alert(`Failed to regenerate peaks for channel ${channelNumber}`)
+    } finally {
+      setRegeneratingPeaksChannels(prev => {
+        const next = new Set(prev)
+        next.delete(channelNumber)
+        return next
+      })
+    }
+  }
+
   useEffect(() => {
     if (sessionId) {
       fetchChannels(sessionId)
@@ -720,10 +780,12 @@ function SessionPage({
       onRegenerateHlsPeaks={regenerateHlsAndPeaks}
       onRegenerateAllMp3s={regenerateAllMp3s}
       onRegenerateChannelMp3={regenerateChannelMp3}
+      onRegenerateChannelPeaks={regenerateChannelPeaks}
       isLoading={isLoading}
       isRegeneratingHlsPeaks={isRegeneratingHlsPeaks}
       isRegeneratingAllMp3s={isRegeneratingAllMp3s}
       regeneratingChannels={regeneratingChannels}
+      regeneratingPeaksChannels={regeneratingPeaksChannels}
     />
   )
 }
