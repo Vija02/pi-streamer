@@ -23,6 +23,7 @@ import {
   initDatabase,
   upsertSession,
   insertSegment,
+  updateSegmentS3Key,
   touchSession,
   getAllSessions,
   getSession,
@@ -37,7 +38,13 @@ import {
   markSessionComplete,
   triggerProcessing,
 } from "./session-manager";
-import { checkFfmpeg } from "./processor";
+import { 
+  checkFfmpeg, 
+  checkAudiowaveform, 
+  regenerateHlsAndPeaks,
+  regenerateMp3ForChannel,
+  regenerateAllMp3s,
+} from "./processor";
 
 // =============================================================================
 // CONFIGURATION
@@ -178,6 +185,13 @@ async function uploadToS3(item: UploadQueueItem): Promise<boolean> {
     log(
       `Uploaded to S3: s3://${config.s3.bucket}/${item.s3Key} (${data.length} bytes)`
     );
+
+    // Update segment in database with S3 key
+    if (item.segmentDbId) {
+      updateSegmentS3Key(item.segmentDbId, item.s3Key);
+      log(`Updated segment ${item.segmentDbId} with S3 key: ${item.s3Key}`);
+    }
+
     return true;
   } catch (err) {
     log(`S3 upload failed for ${item.localPath}: ${err}`);
@@ -511,8 +525,134 @@ async function handleTriggerProcessing(req: Request): Promise<Response> {
   }
 }
 
+async function handleRegenerateHlsAndPeaks(req: Request): Promise<Response> {
+  try {
+    const body = await req.json();
+    const sessionId = body.sessionId;
+
+    if (!sessionId) {
+      return new Response(
+        JSON.stringify({ error: "Missing sessionId in request body" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    log(`Regenerating HLS/peaks for session: ${sessionId}`);
+
+    const result = await regenerateHlsAndPeaks(sessionId);
+
+    return new Response(
+      JSON.stringify({
+        success: result.success,
+        sessionId,
+        channelsProcessed: result.channelsProcessed,
+        errors: result.errors,
+      }),
+      {
+        status: result.success ? 200 : 400,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+  } catch (err) {
+    return new Response(
+      JSON.stringify({
+        error: "Failed to regenerate HLS/peaks",
+        message: err instanceof Error ? err.message : String(err),
+      }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
+    );
+  }
+}
+
+async function handleRegenerateMp3(req: Request): Promise<Response> {
+  try {
+    const body = await req.json();
+    const sessionId = body.sessionId;
+
+    if (!sessionId) {
+      return new Response(
+        JSON.stringify({ error: "Missing sessionId in request body" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    log(`Regenerating all MP3s for session: ${sessionId}`);
+
+    const result = await regenerateAllMp3s(sessionId);
+
+    return new Response(
+      JSON.stringify({
+        success: result.success,
+        sessionId,
+        results: result.results,
+      }),
+      {
+        status: result.success ? 200 : 400,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+  } catch (err) {
+    return new Response(
+      JSON.stringify({
+        error: "Failed to regenerate MP3s",
+        message: err instanceof Error ? err.message : String(err),
+      }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
+    );
+  }
+}
+
+async function handleRegenerateMp3Channel(req: Request): Promise<Response> {
+  try {
+    const body = await req.json();
+    const sessionId = body.sessionId;
+    const channelNumber = body.channelNumber;
+
+    if (!sessionId) {
+      return new Response(
+        JSON.stringify({ error: "Missing sessionId in request body" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    if (typeof channelNumber !== "number" || channelNumber < 1 || channelNumber > 18) {
+      return new Response(
+        JSON.stringify({ error: "Invalid channelNumber (must be 1-18)" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    log(`Regenerating MP3 for session ${sessionId}, channel ${channelNumber}`);
+
+    const result = await regenerateMp3ForChannel(sessionId, channelNumber);
+
+    return new Response(
+      JSON.stringify({
+        success: result.success,
+        sessionId,
+        channelNumber,
+        error: result.error,
+      }),
+      {
+        status: result.success ? 200 : 400,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+  } catch (err) {
+    return new Response(
+      JSON.stringify({
+        error: "Failed to regenerate MP3",
+        message: err instanceof Error ? err.message : String(err),
+      }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
+    );
+  }
+}
+
 async function handleHealthCheck(): Promise<Response> {
   const sessionManagerStatus = getSessionManagerStatus();
+  const hasFfmpeg = await checkFfmpeg();
+  const hasAudiowaveform = await checkAudiowaveform();
 
   return new Response(
     JSON.stringify({
@@ -522,6 +662,10 @@ async function handleHealthCheck(): Promise<Response> {
         s3Enabled: config.s3.enabled,
         s3Bucket: config.s3.bucket,
         localStorageDir: config.localStorage.dir,
+      },
+      tools: {
+        ffmpeg: hasFfmpeg,
+        audiowaveform: hasAudiowaveform,
       },
       uploadQueue: {
         pending: uploadQueue.length,
@@ -605,9 +749,12 @@ async function handleGetSessionChannels(sessionId: string): Promise<Response> {
       channels: channels.map((ch) => ({
         channelNumber: ch.channel_number,
         url: ch.s3_url,
+        hlsUrl: ch.hls_url,
+        peaksUrl: ch.peaks_url,
         localPath: ch.local_path,
         fileSize: ch.file_size,
         durationSeconds: ch.duration_seconds,
+        isQuiet: ch.is_quiet === 1,
       })),
     }),
     { status: 200, headers: { "Content-Type": "application/json" } }
@@ -643,6 +790,98 @@ async function handleServeAudio(sessionId: string, channelNumber: number): Promi
     });
   } catch (err) {
     return new Response(JSON.stringify({ error: "Failed to serve audio" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+}
+
+async function handleServePeaks(sessionId: string, channelNumber: number): Promise<Response> {
+  const path = await import("path");
+
+  // Check if channel has a peaks_url (redirect to S3)
+  const channels = getProcessedChannels(sessionId);
+  const channel = channels.find((c) => c.channel_number === channelNumber);
+
+  if (channel?.peaks_url) {
+    return Response.redirect(channel.peaks_url, 302);
+  }
+
+  // Try to serve from local file
+  const peaksPath = path.join(
+    config.localStorage.dir,
+    sessionId,
+    "peaks",
+    `channel_${String(channelNumber).padStart(2, "0")}_peaks.json`
+  );
+
+  try {
+    const file = Bun.file(peaksPath);
+    if (!(await file.exists())) {
+      return new Response(JSON.stringify({ error: "Peaks file not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    return new Response(file, {
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": "public, max-age=31536000", // Peaks are immutable
+      },
+    });
+  } catch (err) {
+    return new Response(JSON.stringify({ error: "Failed to serve peaks" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+}
+
+async function handleServeHls(sessionId: string, channelNumber: number, filename: string): Promise<Response> {
+  const path = await import("path");
+
+  // Check if channel has an hls_url (redirect to S3)
+  if (filename.endsWith(".m3u8")) {
+    const channels = getProcessedChannels(sessionId);
+    const channel = channels.find((c) => c.channel_number === channelNumber);
+
+    if (channel?.hls_url) {
+      return Response.redirect(channel.hls_url, 302);
+    }
+  }
+
+  // Serve from local file
+  const hlsPath = path.join(
+    config.localStorage.dir,
+    sessionId,
+    "hls",
+    filename
+  );
+
+  try {
+    const file = Bun.file(hlsPath);
+    if (!(await file.exists())) {
+      return new Response(JSON.stringify({ error: "HLS file not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const contentType = filename.endsWith(".m3u8")
+      ? "application/vnd.apple.mpegurl"
+      : "video/mp2t";
+
+    return new Response(file, {
+      headers: {
+        "Content-Type": contentType,
+        "Cache-Control": filename.endsWith(".m3u8")
+          ? "no-cache" // Playlist can be updated
+          : "public, max-age=31536000", // Segments are immutable
+      },
+    });
+  } catch (err) {
+    return new Response(JSON.stringify({ error: "Failed to serve HLS" }), {
       status: 500,
       headers: { "Content-Type": "application/json" },
     });
@@ -791,6 +1030,12 @@ async function handleRequest(req: Request): Promise<Response> {
       response = await handleSessionComplete(req);
     } else if (path === "/session/process" && method === "POST") {
       response = await handleTriggerProcessing(req);
+    } else if (path === "/session/regenerate" && method === "POST") {
+      response = await handleRegenerateHlsAndPeaks(req);
+    } else if (path === "/session/regenerate-mp3" && method === "POST") {
+      response = await handleRegenerateMp3(req);
+    } else if (path === "/session/regenerate-mp3-channel" && method === "POST") {
+      response = await handleRegenerateMp3Channel(req);
     } else if (path === "/health" && method === "GET") {
       response = await handleHealthCheck();
     } else if (path === "/api/sessions" && method === "GET") {
@@ -803,6 +1048,19 @@ async function handleRequest(req: Request): Promise<Response> {
       const sessionId = parts[3];
       const channelNumber = parseInt(parts[5], 10);
       response = await handleServeAudio(sessionId, channelNumber);
+    } else if (path.match(/^\/api\/sessions\/[^/]+\/channels\/\d+\/peaks$/) && method === "GET") {
+      // Serve peaks file: /api/sessions/:sessionId/channels/:channelNumber/peaks
+      const parts = path.split("/");
+      const sessionId = parts[3];
+      const channelNumber = parseInt(parts[5], 10);
+      response = await handleServePeaks(sessionId, channelNumber);
+    } else if (path.match(/^\/api\/sessions\/[^/]+\/channels\/\d+\/hls\//) && method === "GET") {
+      // Serve HLS files: /api/sessions/:sessionId/channels/:channelNumber/hls/:filename
+      const parts = path.split("/");
+      const sessionId = parts[3];
+      const channelNumber = parseInt(parts[5], 10);
+      const filename = parts.slice(7).join("/"); // Everything after /hls/
+      response = await handleServeHls(sessionId, channelNumber, filename);
     } else if (path.startsWith("/api/sessions/") && path.endsWith("/channels") && method === "GET") {
       const sessionId = path.replace("/api/sessions/", "").replace("/channels", "");
       response = await handleGetSessionChannels(sessionId);
@@ -827,11 +1085,16 @@ async function handleRequest(req: Request): Promise<Response> {
               "POST /stream": "Upload audio segment",
               "POST /session/complete": "Mark session as complete (triggers processing)",
               "POST /session/process": "Manually trigger processing for a session",
+              "POST /session/regenerate": "Regenerate HLS/peaks for a processed session",
+              "POST /session/regenerate-mp3": "Regenerate all MP3s for a session (with normalization)",
+              "POST /session/regenerate-mp3-channel": "Regenerate MP3 for a single channel",
               "GET /health": "Health check & queue status",
               "GET /api/sessions": "List all sessions with stats",
               "GET /api/sessions/:id": "Get session details and processed channels",
-              "GET /api/sessions/:id/channels": "Get channel MP3 URLs for a session",
-              "GET /api/sessions/:id/channels/:num/audio": "Stream audio file",
+              "GET /api/sessions/:id/channels": "Get channel URLs for a session",
+              "GET /api/sessions/:id/channels/:num/audio": "Stream MP3 audio file",
+              "GET /api/sessions/:id/channels/:num/peaks": "Get waveform peaks JSON",
+              "GET /api/sessions/:id/channels/:num/hls/:file": "Stream HLS segment",
               "POST /retry-failed": "Retry failed S3 uploads",
             },
           }),
@@ -876,9 +1139,16 @@ async function main() {
 
   // Check for ffmpeg
   const hasFfmpeg = await checkFfmpeg();
+  const hasAudiowaveform = await checkAudiowaveform();
+  
   if (!hasFfmpeg) {
     log("WARNING: ffmpeg not found. Audio processing will fail.");
     log("Install with: sudo apt install ffmpeg");
+  }
+  
+  if (!hasAudiowaveform) {
+    log("WARNING: audiowaveform not found. Waveform peaks generation will fail.");
+    log("Install from: https://github.com/bbc/audiowaveform");
   }
 
   log("XR18 Stream Receiver starting...");
@@ -890,6 +1160,7 @@ async function main() {
     log(`  S3 Prefix: ${config.s3.prefix}`);
   }
   log(`  FFmpeg: ${hasFfmpeg ? "available" : "NOT FOUND"}`);
+  log(`  Audiowaveform: ${hasAudiowaveform ? "available" : "NOT FOUND"}`);
   log("");
 
   // Check for required S3 config

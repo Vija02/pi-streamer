@@ -1,6 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Route, Switch, useRoute, useLocation, Link } from 'wouter'
 import WaveSurfer from 'wavesurfer.js'
+import Hls from 'hls.js'
+import { Button } from '@/components/ui/button'
+import { SimpleDropdown, SimpleDropdownItem } from '@/components/ui/simple-dropdown'
 
 // Types
 interface Session {
@@ -21,9 +24,12 @@ interface Session {
 interface Channel {
   channelNumber: number
   url: string | null
+  hlsUrl: string | null
+  peaksUrl: string | null
   localPath: string
   fileSize: number
   durationSeconds: number | null
+  isQuiet: boolean
 }
 
 interface SessionChannelsResponse {
@@ -137,70 +143,120 @@ function SessionsList({
   )
 }
 
-function AudioPlayer({ channel, sessionId }: { channel: Channel; sessionId: string }) {
+function AudioPlayer({ 
+  channel, 
+  sessionId,
+  isRegenerating,
+  onRegenerate,
+}: { 
+  channel: Channel
+  sessionId: string
+  isRegenerating?: boolean
+  onRegenerate?: () => void
+}) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
   const wavesurferRef = useRef<WaveSurfer | null>(null)
+  const hlsRef = useRef<Hls | null>(null)
+
+  const [isLoaded, setIsLoaded] = useState(false)
   const [isPlaying, setIsPlaying] = useState(false)
-  const [isReady, setIsReady] = useState(false)
-  const [isLoading, setIsLoading] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
-  const [duration, setDuration] = useState(0)
+  const [duration, setDuration] = useState(channel.durationSeconds || 0)
+  const [error, setError] = useState<string | null>(null)
 
-  // Construct audio URL - use S3 URL if available, otherwise local path via API
-  const audioUrl = channel.url || `${API_BASE}/api/sessions/${sessionId}/channels/${channel.channelNumber}/audio`
+  // URLs
+  const peaksUrl = channel.peaksUrl || `${API_BASE}/api/sessions/${sessionId}/channels/${channel.channelNumber}/peaks`
+  const hlsUrl = channel.hlsUrl
+  const mp3Url = channel.url || `${API_BASE}/api/sessions/${sessionId}/channels/${channel.channelNumber}/audio`
 
-  const initWaveSurfer = useCallback(() => {
-    if (!containerRef.current || wavesurferRef.current) return
+  const loadPlayer = async () => {
+    if (!containerRef.current || isLoaded) return
+    setError(null)
 
-    setIsLoading(true)
+    try {
+      // 1. Fetch peaks
+      const peaksResponse = await fetch(peaksUrl)
+      if (!peaksResponse.ok) {
+        throw new Error('Failed to load waveform data')
+      }
+      const peaksData = await peaksResponse.json()
 
-    const ws = WaveSurfer.create({
-      container: containerRef.current,
-      waveColor: '#64748b',
-      progressColor: '#10b981',
-      cursorColor: '#f8fafc',
-      cursorWidth: 2,
-      barWidth: 2,
-      barGap: 1,
-      barRadius: 2,
-      height: 60,
-      normalize: true,
-      url: audioUrl,
-    })
+      // 2. Create audio element
+      const audio = document.createElement('audio')
+      audio.crossOrigin = 'anonymous'
+      audioRef.current = audio
 
-    ws.on('ready', () => {
-      setIsReady(true)
-      setIsLoading(false)
-      setDuration(ws.getDuration())
-    })
+      // 3. Setup HLS or fallback to MP3
+      if (hlsUrl && Hls.isSupported()) {
+        const hls = new Hls()
+        hls.loadSource(hlsUrl)
+        hls.attachMedia(audio)
+        hls.on(Hls.Events.ERROR, (_, data) => {
+          if (data.fatal) {
+            console.error('HLS error, falling back to MP3:', data)
+            hls.destroy()
+            audio.src = mp3Url
+          }
+        })
+        hlsRef.current = hls
+      } else if (hlsUrl && audio.canPlayType('application/vnd.apple.mpegurl')) {
+        // Safari native HLS
+        audio.src = hlsUrl
+      } else {
+        // Fallback to MP3
+        audio.src = mp3Url
+      }
 
-    ws.on('play', () => setIsPlaying(true))
-    ws.on('pause', () => setIsPlaying(false))
-    ws.on('finish', () => setIsPlaying(false))
-    ws.on('timeupdate', (time) => setCurrentTime(time))
-    ws.on('error', (err) => {
-      console.error('WaveSurfer error:', err)
-      setIsLoading(false)
-    })
+      // 4. Create WaveSurfer with pre-computed peaks
+      const ws = WaveSurfer.create({
+        container: containerRef.current,
+        waveColor: '#64748b',
+        progressColor: '#10b981',
+        cursorColor: '#f8fafc',
+        cursorWidth: 2,
+        barWidth: 2,
+        barGap: 1,
+        barRadius: 2,
+        height: 60,
+        normalize: true,
+        media: audio,
+        peaks: [peaksData.data],
+        duration: channel.durationSeconds || peaksData.length / peaksData.sample_rate,
+      })
 
-    wavesurferRef.current = ws
-  }, [audioUrl])
+      ws.on('ready', () => {
+        setDuration(ws.getDuration())
+      })
+      ws.on('play', () => setIsPlaying(true))
+      ws.on('pause', () => setIsPlaying(false))
+      ws.on('finish', () => setIsPlaying(false))
+      ws.on('timeupdate', (time) => setCurrentTime(time))
 
+      wavesurferRef.current = ws
+      setIsLoaded(true)
+    } catch (err) {
+      console.error('Failed to load player:', err)
+      setError(err instanceof Error ? err.message : 'Failed to load audio player')
+    }
+  }
+
+  // Load player automatically on mount
+  useEffect(() => {
+    loadPlayer()
+  }, [])
+
+  // Cleanup
   useEffect(() => {
     return () => {
-      if (wavesurferRef.current) {
-        wavesurferRef.current.destroy()
-        wavesurferRef.current = null
-      }
+      wavesurferRef.current?.destroy()
+      hlsRef.current?.destroy()
+      audioRef.current?.pause()
     }
   }, [])
 
   const handlePlayPause = () => {
-    if (!wavesurferRef.current) {
-      initWaveSurfer()
-      return
-    }
-    wavesurferRef.current.playPause()
+    wavesurferRef.current?.playPause()
   }
 
   const formatTime = (seconds: number): string => {
@@ -214,25 +270,42 @@ function AudioPlayer({ channel, sessionId }: { channel: Channel; sessionId: stri
   }
 
   return (
-    <div className="bg-slate-800 p-4 rounded-lg flex flex-col gap-3">
+    <div className="bg-slate-800 p-4 rounded-lg flex flex-col gap-3 relative">
+      {/* Header */}
       <div className="flex flex-wrap items-center gap-2 sm:gap-4">
         <span className="font-semibold text-base min-w-[100px]">Channel {channel.channelNumber}</span>
+        {channel.isQuiet && (
+          <span className="bg-slate-600 text-slate-300 px-2 py-0.5 rounded text-xs font-medium">
+            Quiet
+          </span>
+        )}
         <span className="text-sm text-slate-400">{formatDuration(channel.durationSeconds)}</span>
         <span className="text-sm text-slate-400">{formatBytes(channel.fileSize)}</span>
       </div>
 
       {/* Waveform container */}
+      {!isLoaded && (
+        <div className="w-full rounded bg-slate-900 h-[60px] flex items-center justify-center">
+          {error ? (
+            <span className="text-red-400 text-sm">{error}</span>
+          ) : (
+            <span className="text-slate-400 text-sm flex items-center gap-2">
+              <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+              Loading waveform...
+            </span>
+          )}
+        </div>
+      )}
       <div
         ref={containerRef}
-        className={`w-full rounded bg-slate-900 ${!isReady && !isLoading ? 'h-[60px] flex items-center justify-center' : ''}`}
-      >
-        {!isReady && !isLoading && (
-          <span className="text-slate-500 text-sm">Click play to load waveform</span>
-        )}
-      </div>
+        className={`w-full rounded bg-slate-900 min-h-[60px] ${!isLoaded ? 'hidden' : ''}`}
+      />
 
       {/* Time display */}
-      {isReady && (
+      {isLoaded && (
         <div className="flex justify-between text-xs text-slate-400">
           <span>{formatTime(currentTime)}</span>
           <span>{formatTime(duration)}</span>
@@ -240,36 +313,65 @@ function AudioPlayer({ channel, sessionId }: { channel: Channel; sessionId: stri
       )}
 
       {/* Controls */}
-      <div className="flex gap-2 items-center">
-        <button
-          onClick={handlePlayPause}
-          disabled={isLoading}
-          className="bg-emerald-500 text-white px-4 py-2 rounded border-none text-sm font-medium cursor-pointer hover:bg-emerald-600 transition-colors disabled:bg-slate-600 disabled:cursor-wait flex items-center gap-2"
+      <div className="flex gap-2 items-center flex-wrap">
+        {isLoaded && (
+          <Button
+            onClick={handlePlayPause}
+            className="bg-emerald-500 hover:bg-emerald-600"
+          >
+            {isPlaying ? 'Pause' : 'Play'}
+          </Button>
+        )}
+        
+        <SimpleDropdown
+          trigger={
+            <Button variant="outline" size="sm">
+              Options
+              <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </Button>
+          }
         >
-          {isLoading ? (
-            <>
+          {channel.url && (
+            <a href={channel.url} download className="flex items-center gap-2 cursor-pointer relative rounded-sm px-2 py-1.5 text-sm transition-colors hover:bg-slate-700">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              Download MP3
+            </a>
+          )}
+          <SimpleDropdownItem 
+            onClick={onRegenerate}
+            disabled={isRegenerating}
+          >
+            {isRegenerating ? (
               <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
               </svg>
-              Loading...
-            </>
-          ) : isPlaying ? (
-            'Pause'
-          ) : (
-            'Play'
-          )}
-        </button>
-        {channel.url && (
-          <a
-            href={channel.url}
-            download
-            className="bg-slate-700 text-slate-200 px-4 py-2 rounded text-sm font-medium no-underline inline-block text-center hover:bg-slate-600 transition-colors"
-          >
-            Download
-          </a>
-        )}
+            ) : (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            )}
+            {isRegenerating ? 'Regenerating...' : 'Regenerate MP3'}
+          </SimpleDropdownItem>
+        </SimpleDropdown>
       </div>
+
+      {/* Regenerating overlay */}
+      {isRegenerating && (
+        <div className="absolute inset-0 bg-slate-900/80 flex items-center justify-center rounded-lg">
+          <span className="flex items-center gap-2 text-sm">
+            <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+            Regenerating...
+          </span>
+        </div>
+      )}
     </div>
   )
 }
@@ -278,13 +380,31 @@ function SessionDetail({
   session,
   channels,
   onTriggerProcess,
+  onRegenerateHlsPeaks,
+  onRegenerateAllMp3s,
+  onRegenerateChannelMp3,
   isLoading,
+  isRegeneratingHlsPeaks,
+  isRegeneratingAllMp3s,
+  regeneratingChannels,
 }: {
   session: Session
   channels: Channel[]
   onTriggerProcess: () => void
+  onRegenerateHlsPeaks: () => void
+  onRegenerateAllMp3s: () => void
+  onRegenerateChannelMp3: (channelNumber: number) => void
   isLoading: boolean
+  isRegeneratingHlsPeaks: boolean
+  isRegeneratingAllMp3s: boolean
+  regeneratingChannels: Set<number>
 }) {
+  // Check if any channels are missing HLS or peaks
+  const channelsMissingHlsOrPeaks = channels.filter(
+    (ch) => !ch.hlsUrl || !ch.peaksUrl
+  ).length
+  
+  const isAnyRegenerating = isRegeneratingHlsPeaks || isRegeneratingAllMp3s || regeneratingChannels.size > 0
   return (
     <div className="max-w-4xl">
       {/* Back button for mobile */}
@@ -352,10 +472,63 @@ function SessionDetail({
 
       {session.status === 'processed' && channels.length > 0 && (
         <div>
-          <h3 className="text-lg font-semibold mb-4">Audio Channels</h3>
+          <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+            <h3 className="text-lg font-semibold">Audio Channels</h3>
+            <SimpleDropdown
+              align="end"
+              disabled={isAnyRegenerating}
+              trigger={
+                <Button variant="outline" disabled={isAnyRegenerating}>
+                  {isAnyRegenerating ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4 mr-2" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Processing...
+                    </>
+                  ) : (
+                    <>
+                      Actions
+                      <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </>
+                  )}
+                </Button>
+              }
+            >
+              <SimpleDropdownItem 
+                onClick={onRegenerateAllMp3s}
+                disabled={isRegeneratingAllMp3s}
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Regenerate All MP3s
+              </SimpleDropdownItem>
+              {channelsMissingHlsOrPeaks > 0 && (
+                <SimpleDropdownItem 
+                  onClick={onRegenerateHlsPeaks}
+                  disabled={isRegeneratingHlsPeaks}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                  </svg>
+                  Generate HLS/Peaks ({channelsMissingHlsOrPeaks})
+                </SimpleDropdownItem>
+              )}
+            </SimpleDropdown>
+          </div>
           <div className="flex flex-col gap-3">
             {channels.map((channel) => (
-              <AudioPlayer key={channel.channelNumber} channel={channel} sessionId={session.id} />
+              <AudioPlayer 
+                key={channel.channelNumber} 
+                channel={channel} 
+                sessionId={session.id}
+                isRegenerating={regeneratingChannels.has(channel.channelNumber)}
+                onRegenerate={() => onRegenerateChannelMp3(channel.channelNumber)}
+              />
             ))}
           </div>
         </div>
@@ -379,6 +552,9 @@ function SessionPage({
   const sessionId = params?.id || null
   const [channels, setChannels] = useState<Channel[]>([])
   const [isLoading, setIsLoading] = useState(false)
+  const [isRegeneratingHlsPeaks, setIsRegeneratingHlsPeaks] = useState(false)
+  const [isRegeneratingAllMp3s, setIsRegeneratingAllMp3s] = useState(false)
+  const [regeneratingChannels, setRegeneratingChannels] = useState<Set<number>>(new Set())
   const [, setLocation] = useLocation()
 
   const session = sessions.find((s) => s.id === sessionId)
@@ -417,6 +593,102 @@ function SessionPage({
     }
   }
 
+  // Regenerate HLS and peaks
+  const regenerateHlsAndPeaks = async () => {
+    if (!sessionId) return
+
+    setIsRegeneratingHlsPeaks(true)
+    try {
+      const response = await fetch(`${API_BASE}/session/regenerate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId }),
+      })
+      const result = await response.json()
+      
+      if (result.success) {
+        // Refresh channels to get new URLs
+        await fetchChannels(sessionId)
+      } else {
+        console.error('Regeneration failed:', result.errors)
+        alert(`Regeneration failed: ${result.errors?.join(', ') || 'Unknown error'}`)
+      }
+    } catch (err) {
+      console.error('Failed to regenerate:', err)
+      alert('Failed to regenerate HLS/Peaks')
+    } finally {
+      setIsRegeneratingHlsPeaks(false)
+    }
+  }
+
+  // Regenerate all MP3s
+  const regenerateAllMp3s = async () => {
+    if (!sessionId) return
+
+    setIsRegeneratingAllMp3s(true)
+    // Mark all channels as regenerating
+    setRegeneratingChannels(new Set(channels.map(c => c.channelNumber)))
+    
+    try {
+      const response = await fetch(`${API_BASE}/session/regenerate-mp3`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId }),
+      })
+      const result = await response.json()
+      
+      if (result.success) {
+        // Refresh channels to get new data
+        await fetchChannels(sessionId)
+      } else {
+        const failures = result.results?.filter((r: { success: boolean }) => !r.success) || []
+        if (failures.length > 0) {
+          console.error('Some channels failed:', failures)
+          alert(`${failures.length} channel(s) failed to regenerate`)
+        }
+      }
+    } catch (err) {
+      console.error('Failed to regenerate MP3s:', err)
+      alert('Failed to regenerate MP3s')
+    } finally {
+      setIsRegeneratingAllMp3s(false)
+      setRegeneratingChannels(new Set())
+    }
+  }
+
+  // Regenerate single channel MP3
+  const regenerateChannelMp3 = async (channelNumber: number) => {
+    if (!sessionId) return
+
+    setRegeneratingChannels(prev => new Set(prev).add(channelNumber))
+    
+    try {
+      const response = await fetch(`${API_BASE}/session/regenerate-mp3-channel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, channelNumber }),
+      })
+      const result = await response.json()
+      
+      if (result.success) {
+        // Refresh channels to get new data
+        await fetchChannels(sessionId)
+      } else {
+        console.error('Channel regeneration failed:', result.error)
+        alert(`Failed to regenerate channel ${channelNumber}: ${result.error || 'Unknown error'}`)
+      }
+    } catch (err) {
+      console.error('Failed to regenerate channel:', err)
+      alert(`Failed to regenerate channel ${channelNumber}`)
+    } finally {
+      setRegeneratingChannels(prev => {
+        const next = new Set(prev)
+        next.delete(channelNumber)
+        return next
+      })
+    }
+  }
+
   useEffect(() => {
     if (sessionId) {
       fetchChannels(sessionId)
@@ -445,7 +717,13 @@ function SessionPage({
       session={session}
       channels={channels}
       onTriggerProcess={triggerProcess}
+      onRegenerateHlsPeaks={regenerateHlsAndPeaks}
+      onRegenerateAllMp3s={regenerateAllMp3s}
+      onRegenerateChannelMp3={regenerateChannelMp3}
       isLoading={isLoading}
+      isRegeneratingHlsPeaks={isRegeneratingHlsPeaks}
+      isRegeneratingAllMp3s={isRegeneratingAllMp3s}
+      regeneratingChannels={regeneratingChannels}
     />
   )
 }

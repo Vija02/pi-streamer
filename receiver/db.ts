@@ -46,8 +46,11 @@ export interface ProcessedChannel {
   local_path: string;
   s3_key: string | null;
   s3_url: string | null;
+  hls_url: string | null;
+  peaks_url: string | null;
   file_size: number;
   duration_seconds: number | null;
+  is_quiet: number; // 0 = false, 1 = true (SQLite boolean)
   created_at: string;
 }
 
@@ -112,13 +115,36 @@ export function initDatabase(): Database {
       local_path TEXT NOT NULL,
       s3_key TEXT,
       s3_url TEXT,
+      hls_url TEXT,
+      peaks_url TEXT,
       file_size INTEGER NOT NULL,
       duration_seconds REAL,
+      is_quiet INTEGER DEFAULT 0,
       created_at TEXT NOT NULL,
       FOREIGN KEY (session_id) REFERENCES sessions(id),
       UNIQUE(session_id, channel_number)
     )
   `);
+
+  // Migration: Add new columns if they don't exist (for existing databases)
+  try {
+    db.run(`ALTER TABLE processed_channels ADD COLUMN hls_url TEXT`);
+    console.log("[DB] Added hls_url column");
+  } catch {
+    // Column already exists
+  }
+  try {
+    db.run(`ALTER TABLE processed_channels ADD COLUMN peaks_url TEXT`);
+    console.log("[DB] Added peaks_url column");
+  } catch {
+    // Column already exists
+  }
+  try {
+    db.run(`ALTER TABLE processed_channels ADD COLUMN is_quiet INTEGER DEFAULT 0`);
+    console.log("[DB] Added is_quiet column");
+  } catch {
+    // Column already exists
+  }
 
   // Create indexes for common queries
   db.run(`CREATE INDEX IF NOT EXISTS idx_segments_session ON segments(session_id)`);
@@ -331,23 +357,29 @@ export function insertProcessedChannel(
   fileSize: number,
   s3Key?: string,
   s3Url?: string,
-  durationSeconds?: number
+  durationSeconds?: number,
+  hlsUrl?: string,
+  peaksUrl?: string,
+  isQuiet?: boolean
 ): ProcessedChannel {
   const db = getDatabase();
   const now = new Date().toISOString();
 
   db.run(
     `INSERT OR REPLACE INTO processed_channels 
-     (session_id, channel_number, local_path, s3_key, s3_url, file_size, duration_seconds, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+     (session_id, channel_number, local_path, s3_key, s3_url, hls_url, peaks_url, file_size, duration_seconds, is_quiet, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       sessionId,
       channelNumber,
       localPath,
       s3Key ?? null,
       s3Url ?? null,
+      hlsUrl ?? null,
+      peaksUrl ?? null,
       fileSize,
       durationSeconds ?? null,
+      isQuiet ? 1 : 0,
       now,
     ]
   );
@@ -381,6 +413,18 @@ export function updateProcessedChannelS3(
   db.run(
     "UPDATE processed_channels SET s3_key = ?, s3_url = ? WHERE id = ?",
     [s3Key, s3Url, channelId]
+  );
+}
+
+export function updateProcessedChannelHlsAndPeaks(
+  channelId: number,
+  hlsUrl: string | null,
+  peaksUrl: string | null
+): void {
+  const db = getDatabase();
+  db.run(
+    "UPDATE processed_channels SET hls_url = ?, peaks_url = ? WHERE id = ?",
+    [hlsUrl, peaksUrl, channelId]
   );
 }
 

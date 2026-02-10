@@ -18,9 +18,21 @@ RUN bun run build
 # Main stage
 FROM oven/bun:1
 
-# Install ffmpeg for audio processing
+# Install ffmpeg and build audiowaveform from source
 RUN apt-get update && apt-get install -y \
     ffmpeg \
+    curl \
+    # audiowaveform build dependencies
+    git cmake g++ make libmad0-dev libsndfile1-dev libgd-dev \
+    libboost-filesystem-dev libboost-program-options-dev libboost-regex-dev \
+    && git clone --depth 1 --branch 1.10.1 https://github.com/bbc/audiowaveform.git /tmp/audiowaveform \
+    && cd /tmp/audiowaveform && mkdir build && cd build \
+    && cmake .. -D ENABLE_TESTS=0 \
+    && make -j$(nproc) && make install \
+    && rm -rf /tmp/audiowaveform \
+    # Clean up build dependencies to reduce image size
+    && apt-get remove -y git cmake g++ make \
+    && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
