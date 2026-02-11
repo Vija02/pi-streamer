@@ -21,6 +21,12 @@ export class GeneratePeaksStep extends BaseStep {
   }
 
   async shouldRun(ctx: StepContext, data: PipelineData): Promise<boolean> {
+    // Skip silent channels - no point generating peaks for silence
+    if (data.isSilent) {
+      this.logger.info(`Skipping peaks for silent channel ${ctx.channelNumber}`);
+      return false;
+    }
+
     // Check if audiowaveform is available
     const hasAudiowaveform = await checkAudiowaveform();
     if (!hasAudiowaveform) {
@@ -95,8 +101,15 @@ export class GeneratePeaksStep extends BaseStep {
       return;
     }
 
-    // Find max absolute value
-    const maxVal = Math.max(...data.map(Math.abs));
+    // Find max absolute value using loop to avoid stack overflow with large arrays
+    let maxVal = 0;
+    for (let i = 0; i < data.length; i++) {
+      const absVal = Math.abs(data[i]);
+      if (absVal > maxVal) {
+        maxVal = absVal;
+      }
+    }
+
     if (maxVal === 0) {
       this.logger.warn(`Peaks data is all zeros: ${filePath}`);
       return;

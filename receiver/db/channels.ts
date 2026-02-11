@@ -3,6 +3,9 @@
  */
 import { getDatabase } from "./connection";
 import type { ProcessedChannel } from "./types";
+import { createLogger } from "../utils/logger";
+
+const logger = createLogger("Channels");
 
 /**
  * Insert or replace a processed channel
@@ -23,6 +26,21 @@ export function insertProcessedChannel(
   const db = getDatabase();
   const now = new Date().toISOString();
 
+  // Convert boolean flags - log if undefined (which becomes false/0)
+  const quietFlag = isQuiet === true ? 1 : 0;
+  const silentFlag = isSilent === true ? 1 : 0;
+  
+  if (isQuiet === undefined || isSilent === undefined) {
+    logger.warn(
+      `Channel ${channelNumber} flags are undefined: isQuiet=${isQuiet}, isSilent=${isSilent}. ` +
+      `This may indicate the analyze-audio step was skipped or failed.`
+    );
+  }
+
+  logger.debug(
+    `Saving channel ${channelNumber}: isQuiet=${isQuiet} (${quietFlag}), isSilent=${isSilent} (${silentFlag})`
+  );
+
   db.run(
     `INSERT OR REPLACE INTO processed_channels 
      (session_id, channel_number, local_path, s3_key, s3_url, hls_url, peaks_url, file_size, duration_seconds, is_quiet, is_silent, created_at)
@@ -37,8 +55,8 @@ export function insertProcessedChannel(
       peaksUrl ?? null,
       fileSize,
       durationSeconds ?? null,
-      isQuiet ? 1 : 0,
-      isSilent ? 1 : 0,
+      quietFlag,
+      silentFlag,
       now,
     ]
   );

@@ -62,6 +62,12 @@ export async function processChannel(
     const { data } = pipelineResult;
 
     if (pipelineResult.success) {
+      // Log pipeline data for debugging
+      logger.debug(
+        `Channel ${channelNumber} pipeline complete - isQuiet: ${data.isQuiet}, isSilent: ${data.isSilent}, ` +
+        `skippedSteps: ${pipelineResult.skippedSteps?.join(", ") || "none"}`
+      );
+
       // Save to database
       const channel = insertProcessedChannel(
         sessionId,

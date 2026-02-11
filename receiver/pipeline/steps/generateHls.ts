@@ -21,6 +21,12 @@ export class GenerateHlsStep extends BaseStep {
   }
 
   async shouldRun(ctx: StepContext, data: PipelineData): Promise<boolean> {
+    // Skip silent channels - no point generating HLS for silence
+    if (data.isSilent) {
+      this.logger.info(`Skipping HLS for silent channel ${ctx.channelNumber}`);
+      return false;
+    }
+
     // Skip if we already have HLS
     if (data.hlsPlaylistPath) {
       const file = Bun.file(data.hlsPlaylistPath);

@@ -16,6 +16,10 @@ import {
   parseOutputData,
   incrementRetryCount,
 } from "../db/pipelineRuns";
+import {
+  getProcessedChannel,
+  updateProcessedChannelFlags,
+} from "../db/channels";
 import { getAllSessions, getSessionsByStatus } from "../db/sessions";
 import { getRecordingsCountBySource, getAllTags } from "../db/recordings";
 import { runSingleStep } from "../pipeline/runner";
@@ -150,6 +154,26 @@ app.post("/pipeline-runs/:runId/retry", async (c) => {
     const result = await runSingleStep(step, ctx, inputData, {
       trackInDatabase: false, // Don't create a new run, we're retrying the existing one
     });
+
+    // If the step was analyze-audio and it succeeded, update the channel flags
+    if (
+      result.success &&
+      run.step_name === "analyze-audio" &&
+      result.data &&
+      (result.data.isQuiet !== undefined || result.data.isSilent !== undefined)
+    ) {
+      const channel = getProcessedChannel(run.session_id, run.channel_number || 1);
+      if (channel) {
+        updateProcessedChannelFlags(
+          channel.id,
+          result.data.isQuiet ?? false,
+          result.data.isSilent ?? false
+        );
+        logger.info(
+          `Updated channel ${run.channel_number} flags: quiet=${result.data.isQuiet}, silent=${result.data.isSilent}`
+        );
+      }
+    }
 
     return c.json({
       success: result.success,
