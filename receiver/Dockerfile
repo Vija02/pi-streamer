@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     curl \
     # audiowaveform build dependencies
-    git cmake g++ make libmad0-dev libsndfile1-dev libgd-dev \
+    git cmake g++ make libmad0-dev libid3tag0-dev libsndfile1-dev libgd-dev \
     libboost-filesystem-dev libboost-program-options-dev libboost-regex-dev \
     && git clone --depth 1 --branch 1.10.1 https://github.com/bbc/audiowaveform.git /tmp/audiowaveform \
     && cd /tmp/audiowaveform && mkdir build && cd build \
