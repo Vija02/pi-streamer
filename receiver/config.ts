@@ -46,8 +46,10 @@ export const config = {
       quietChannelQuality: Number(process.env.QUIET_CHANNEL_VBR_QUALITY) || 7,
     },
     normalization: {
-      enabled: process.env.NORMALIZE_PEAK_DB !== "",
-      peakDb: Number(process.env.NORMALIZE_PEAK_DB ?? -1),
+      enabled: process.env.NORMALIZE_ENABLED !== "false",
+      targetLufs: Number(process.env.NORMALIZE_TARGET_LUFS ?? -16),
+      targetTruePeak: Number(process.env.NORMALIZE_TRUE_PEAK ?? -1.5),
+      targetLra: Number(process.env.NORMALIZE_LRA ?? 11),
     },
     analysis: {
       quietThresholdDb: Number(process.env.QUIET_CHANNEL_THRESHOLD_DB) || -40,

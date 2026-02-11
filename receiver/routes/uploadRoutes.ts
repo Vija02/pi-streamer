@@ -2,16 +2,19 @@
  * Upload Routes
  *
  * Handles single MP3 file uploads (for old recordings).
+ * Uploaded files go through the same LUFS normalization pipeline as streamed recordings.
  */
 import { Hono } from "hono";
-import { mkdir, stat } from "fs/promises";
+import { mkdir } from "fs/promises";
+import { join } from "path";
 import { createLogger } from "../utils/logger";
 import { upsertSession, updateSessionStatus } from "../db/sessions";
 import { insertProcessedChannel } from "../db/channels";
 import { createRecording } from "../db/recordings";
-import { saveLocalFile, uploadFileToS3 } from "../services/storage";
-import { getMp3Path, getMp3S3Key, getMp3Dir, getPeaksDir, getHlsDir } from "../utils/paths";
-import { regenerateChannelMedia } from "../pipeline/channelProcessor";
+import { saveLocalFile } from "../services/storage";
+import { getMp3Dir, getPeaksDir, getHlsDir, getTempDir } from "../utils/paths";
+import { processChannelWithPipeline } from "../pipeline/channelProcessor";
+import { uploadedMp3Pipeline } from "../pipeline/steps";
 
 const logger = createLogger("UploadRoutes");
 
@@ -20,8 +23,9 @@ const app = new Hono();
 /**
  * POST / - Upload single MP3 file
  *
- * Creates a synthetic session for the upload, stores the MP3,
- * generates peaks and HLS, and creates recording metadata.
+ * Creates a synthetic session for the upload, processes through the
+ * normalization pipeline (analyze -> normalize -> encode -> peaks -> HLS -> upload),
+ * and creates recording metadata.
  */
 app.post("/", async (c) => {
   try {
@@ -62,41 +66,49 @@ app.post("/", async (c) => {
     // Create session (synthetic - 1 channel)
     upsertSession(sessionId, 48000, 1);
 
-    // Save the MP3 file
-    const mp3Path = getMp3Path(sessionId, channelNumber);
+    // Ensure directories exist
     await mkdir(getMp3Dir(sessionId), { recursive: true });
-
-    const fileBuffer = await file.arrayBuffer();
-    await saveLocalFile(mp3Path, fileBuffer);
-
-    logger.info(`Saved uploaded file: ${mp3Path} (${fileBuffer.byteLength} bytes)`);
-
-    // Upload to S3
-    const s3Key = getMp3S3Key(sessionId, channelNumber);
-    const s3Result = await uploadFileToS3(mp3Path, s3Key, "audio/mpeg");
-
-    // Generate peaks and HLS
     await mkdir(getPeaksDir(sessionId), { recursive: true });
     await mkdir(getHlsDir(sessionId), { recursive: true });
+    await mkdir(getTempDir(sessionId), { recursive: true });
 
-    const mediaResult = await regenerateChannelMedia(sessionId, channelNumber, mp3Path);
+    // Save uploaded file to temp directory for processing
+    const uploadedMp3Path = join(getTempDir(sessionId), `uploaded_${channelNumber}.mp3`);
+    const fileBuffer = await file.arrayBuffer();
+    await saveLocalFile(uploadedMp3Path, fileBuffer);
 
-    // Get file stats
-    const stats = await stat(mp3Path);
+    logger.info(`Saved uploaded file: ${uploadedMp3Path} (${fileBuffer.byteLength} bytes)`);
+
+    // Process through the upload pipeline (analyze, normalize, encode, peaks, HLS, upload)
+    const result = await processChannelWithPipeline(
+      sessionId,
+      channelNumber,
+      uploadedMp3Pipeline,
+      { uploadedMp3Path }
+    );
+
+    if (!result.success) {
+      // Clean up on failure
+      updateSessionStatus(sessionId, "failed");
+      return c.json({ 
+        error: "Processing failed", 
+        message: result.error 
+      }, 500);
+    }
 
     // Save processed channel to database
     insertProcessedChannel(
       sessionId,
       channelNumber,
-      mp3Path,
-      stats.size,
-      s3Result?.s3Key,
-      s3Result?.s3Url,
-      undefined, // duration - could get from ffprobe
-      mediaResult.hlsS3Url,
-      mediaResult.peaksS3Url,
-      false, // isQuiet
-      false // isSilent
+      result.mp3Path || uploadedMp3Path,
+      result.fileSize || fileBuffer.byteLength,
+      undefined, // s3Key - handled by pipeline
+      result.mp3S3Url,
+      result.durationSeconds,
+      result.hlsS3Url,
+      result.peaksS3Url,
+      result.isQuiet,
+      result.isSilent
     );
 
     // Mark session as processed
@@ -125,9 +137,11 @@ app.post("/", async (c) => {
       },
       channel: {
         channelNumber,
-        mp3Url: s3Result?.s3Url,
-        peaksUrl: mediaResult.peaksS3Url,
-        hlsUrl: mediaResult.hlsS3Url,
+        mp3Url: result.mp3S3Url,
+        peaksUrl: result.peaksS3Url,
+        hlsUrl: result.hlsS3Url,
+        isQuiet: result.isQuiet,
+        isSilent: result.isSilent,
       },
     });
   } catch (error) {

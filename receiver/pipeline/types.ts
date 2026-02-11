@@ -43,6 +43,9 @@ export interface PipelineData {
   /** Path to concatenated FLAC file */
   concatenatedPath?: string;
 
+  /** Path to uploaded MP3 file (for upload pipeline) */
+  uploadedMp3Path?: string;
+
   /** Audio analysis results */
   audioStats?: AudioStats;
 

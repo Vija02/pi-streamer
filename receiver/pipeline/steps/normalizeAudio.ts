@@ -1,18 +1,19 @@
 /**
  * Normalize Audio Step
  *
- * Applies peak normalization to the audio if configured and not a quiet channel.
+ * Applies LUFS-based loudness normalization to the audio if configured and not a quiet channel.
+ * Uses FFmpeg's loudnorm filter for broadcast-standard loudness normalization.
  */
 import { mkdir, unlink } from "fs/promises";
 import { BaseStep } from "./base";
 import type { StepContext, PipelineData, StepResult } from "../types";
-import { applyVolumeGain } from "../../utils/ffmpeg";
+import { applyLoudnessNormalization } from "../../utils/ffmpeg";
 import { getNormalizedChannelPath } from "../../utils/paths";
 import { config } from "../../config";
 
 export class NormalizeAudioStep extends BaseStep {
   name = "normalize-audio";
-  description = "Apply peak normalization to audio";
+  description = "Apply LUFS-based loudness normalization to audio";
 
   constructor() {
     super();
@@ -38,13 +39,13 @@ export class NormalizeAudioStep extends BaseStep {
       return false;
     }
 
-    // Skip if gain would be negligible (less than 0.5dB)
-    const targetPeak = config.processing.normalization.peakDb;
-    const currentPeak = data.audioStats.maxVolume;
-    const gain = targetPeak - currentPeak;
+    // Skip if loudness is already close to target (within 1 LU)
+    const targetLufs = config.processing.normalization.targetLufs;
+    const currentLufs = data.audioStats.integratedLoudness;
+    const lufsDiff = Math.abs(targetLufs - currentLufs);
 
-    if (Math.abs(gain) < 0.5) {
-      this.logger.debug(`Gain too small (${gain.toFixed(2)}dB), skipping normalization`);
+    if (lufsDiff < 1) {
+      this.logger.debug(`Loudness already at target (${currentLufs.toFixed(1)} LUFS, diff=${lufsDiff.toFixed(1)} LU), skipping normalization`);
       return false;
     }
 
@@ -54,21 +55,22 @@ export class NormalizeAudioStep extends BaseStep {
   async execute(ctx: StepContext, data: PipelineData): Promise<StepResult> {
     const { sessionId, channelNumber, workDir } = ctx;
 
-    if (!data.concatenatedPath) {
-      return this.failure("No concatenated file. Run concatenate first.");
+    // Support both concatenated FLAC and uploaded MP3
+    const inputPath = data.concatenatedPath || data.uploadedMp3Path;
+    if (!inputPath) {
+      return this.failure("No input file. Provide concatenatedPath or uploadedMp3Path.");
     }
 
     if (!data.audioStats) {
       return this.failure("No audio stats. Run analyze-audio first.");
     }
 
-    const targetPeak = config.processing.normalization.peakDb;
-    const currentPeak = data.audioStats.maxVolume;
-    const gain = targetPeak - currentPeak;
+    const { targetLufs, targetTruePeak, targetLra } = config.processing.normalization;
+    const currentLufs = data.audioStats.integratedLoudness;
 
     this.logger.info(
-      `Normalizing channel ${channelNumber}: ${gain > 0 ? "+" : ""}${gain.toFixed(1)}dB ` +
-        `(${currentPeak.toFixed(1)}dB -> ${targetPeak}dB)`
+      `Normalizing channel ${channelNumber}: ${currentLufs.toFixed(1)} LUFS -> ${targetLufs} LUFS ` +
+        `(target TP: ${targetTruePeak}dB)`
     );
 
     // Ensure work directory exists
@@ -79,19 +81,34 @@ export class NormalizeAudioStep extends BaseStep {
     try {
       const normalizedPath = getNormalizedChannelPath(sessionId, channelNumber);
 
-      await applyVolumeGain(data.concatenatedPath, normalizedPath, gain);
+      const result = await applyLoudnessNormalization(
+        inputPath,
+        normalizedPath,
+        targetLufs,
+        targetTruePeak,
+        targetLra,
+        data.audioStats.integratedLoudness,
+        data.audioStats.truePeak,
+        data.audioStats.loudnessRange
+      );
 
       const durationMs = Date.now() - startTime;
       const file = Bun.file(normalizedPath);
       const fileSize = file.size;
 
       this.logger.info(
-        `Normalized to ${normalizedPath} (${(fileSize / 1024 / 1024).toFixed(2)} MB) in ${durationMs}ms`
+        `Normalized to ${normalizedPath} (${(fileSize / 1024 / 1024).toFixed(2)} MB) in ${durationMs}ms ` +
+          `[${result.inputLufs.toFixed(1)} -> ${result.outputLufs} LUFS]`
       );
 
       return this.success(
         { normalizedPath },
-        { durationMs, gainDb: gain, bytesProcessed: fileSize }
+        { 
+          durationMs, 
+          inputLufs: result.inputLufs, 
+          outputLufs: result.outputLufs,
+          bytesProcessed: fileSize 
+        }
       );
     } catch (error) {
       return this.logFailure(error, "Failed to normalize audio");

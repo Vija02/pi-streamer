@@ -29,11 +29,11 @@ export class AnalyzeAudioStep extends BaseStep {
   async execute(ctx: StepContext, data: PipelineData): Promise<StepResult> {
     const { channelNumber } = ctx;
 
-    // Determine which file to analyze
-    const audioPath = data.concatenatedPath || data.extractedPaths?.[0];
+    // Determine which file to analyze (support uploaded MP3s too)
+    const audioPath = data.concatenatedPath || data.uploadedMp3Path || data.extractedPaths?.[0];
 
     if (!audioPath) {
-      return this.failure("No audio file to analyze. Run concatenate first.");
+      return this.failure("No audio file to analyze. Provide concatenatedPath or uploadedMp3Path.");
     }
 
     this.logger.info(`Analyzing audio for channel ${channelNumber}`);
@@ -53,7 +53,8 @@ export class AnalyzeAudioStep extends BaseStep {
 
       this.logger.info(
         `Channel ${channelNumber} analysis: max=${audioStats.maxVolume.toFixed(1)}dB, ` +
-          `mean=${audioStats.meanVolume.toFixed(1)}dB, quiet=${audioStats.isQuiet}, silent=${isSilent}`
+          `mean=${audioStats.meanVolume.toFixed(1)}dB, LUFS=${audioStats.integratedLoudness.toFixed(1)}, ` +
+          `quiet=${audioStats.isQuiet}, silent=${isSilent}`
       );
 
       return this.success(
@@ -66,6 +67,8 @@ export class AnalyzeAudioStep extends BaseStep {
           durationMs,
           maxVolumeDb: audioStats.maxVolume,
           meanVolumeDb: audioStats.meanVolume,
+          integratedLufs: audioStats.integratedLoudness,
+          truePeakDb: audioStats.truePeak,
         }
       );
     } catch (error) {

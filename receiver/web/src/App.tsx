@@ -30,6 +30,7 @@ interface Channel {
   fileSize: number
   durationSeconds: number | null
   isQuiet: boolean
+  isSilent: boolean
 }
 
 interface SessionChannelsResponse {
@@ -423,6 +424,12 @@ function SessionDetail({
   regeneratingChannels: Set<number>
   regeneratingPeaksChannels: Set<number>
 }) {
+  const [showSilentChannels, setShowSilentChannels] = useState(false)
+  
+  // Filter channels - hide silent channels unless showSilentChannels is true
+  const visibleChannels = channels.filter(c => showSilentChannels || !c.isSilent)
+  const silentChannelCount = channels.filter(c => c.isSilent).length
+  
   // Check if any channels are missing HLS or peaks
   const channelsMissingHlsOrPeaks = channels.filter(
     (ch) => !ch.hlsUrl || !ch.peaksUrl
@@ -545,7 +552,7 @@ function SessionDetail({
             </SimpleDropdown>
           </div>
           <div className="flex flex-col gap-3">
-            {channels.map((channel) => (
+            {visibleChannels.map((channel) => (
               <AudioPlayer 
                 key={channel.channelNumber} 
                 channel={channel} 
@@ -557,6 +564,24 @@ function SessionDetail({
               />
             ))}
           </div>
+          
+          {/* Toggle for silent channels */}
+          {silentChannelCount > 0 && (
+            <button
+              onClick={() => setShowSilentChannels(!showSilentChannels)}
+              className="mt-4 text-sm text-slate-400 hover:text-slate-200 flex items-center gap-2"
+            >
+              <svg 
+                className={`w-4 h-4 transition-transform ${showSilentChannels ? 'rotate-90' : ''}`} 
+                fill="none" 
+                stroke="currentColor" 
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+              {showSilentChannels ? 'Hide' : 'Show'} {silentChannelCount} silent channel{silentChannelCount !== 1 ? 's' : ''}
+            </button>
+          )}
         </div>
       )}
 

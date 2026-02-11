@@ -38,8 +38,8 @@ import { uploadHlsStep } from "./uploadHls";
  * 1. prefetch-flac - Download FLAC segments from S3 if needed
  * 2. extract-channel - Extract single channel from multi-channel FLACs
  * 3. concatenate - Combine all segments into one file
- * 4. analyze-audio - Detect volume levels, quiet/silent status
- * 5. normalize-audio - Apply peak normalization (if enabled & not quiet)
+ * 4. analyze-audio - Detect volume levels, LUFS, quiet/silent status
+ * 5. normalize-audio - Apply LUFS-based loudness normalization (if enabled & not quiet)
  * 6. encode-mp3 - Encode to MP3 with appropriate quality
  * 7. generate-peaks - Create waveform JSON
  * 8. generate-hls - Create HLS segments
@@ -83,6 +83,24 @@ export const hlsOnlyPipeline: PipelineStep[] = [
 export const peaksAndHlsPipeline: PipelineStep[] = [
   generatePeaksStep,
   generateHlsStep,
+  uploadPeaksStep,
+  uploadHlsStep,
+];
+
+/**
+ * Pipeline for processing uploaded MP3 files
+ * Includes analysis, normalization, re-encoding, and media generation
+ * 
+ * Note: Expects `uploadedMp3Path` in initial data (the original uploaded file)
+ * The analyze step will use this for analysis, then normalization outputs to concatenatedPath
+ */
+export const uploadedMp3Pipeline: PipelineStep[] = [
+  analyzeAudioStep,
+  normalizeAudioStep,
+  encodeMp3Step,
+  generatePeaksStep,
+  generateHlsStep,
+  uploadMp3Step,
   uploadPeaksStep,
   uploadHlsStep,
 ];

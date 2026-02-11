@@ -34,11 +34,11 @@ export class EncodeMp3Step extends BaseStep {
   async execute(ctx: StepContext, data: PipelineData): Promise<StepResult> {
     const { sessionId, channelNumber, outputDir } = ctx;
 
-    // Use normalized path if available, otherwise concatenated path
-    const inputPath = data.normalizedPath || data.concatenatedPath;
+    // Use normalized path if available, otherwise concatenated path or uploaded MP3
+    const inputPath = data.normalizedPath || data.concatenatedPath || data.uploadedMp3Path;
 
     if (!inputPath) {
-      return this.failure("No input file for encoding. Run concatenate or normalize first.");
+      return this.failure("No input file for encoding. Provide concatenatedPath, normalizedPath, or uploadedMp3Path.");
     }
 
     // Determine encoding quality based on whether channel is quiet
