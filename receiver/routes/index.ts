@@ -96,10 +96,11 @@ app.get("*", async (c) => {
   const path = c.req.path;
 
   // Don't serve index.html for API routes
+  // Note: /session is NOT excluded here because frontend uses /session/:id for SPA routing
+  // The /session/* POST endpoints are already registered above and will match first
   if (
     path.startsWith("/api") ||
     path.startsWith("/stream") ||
-    path.startsWith("/session") ||
     path.startsWith("/health") ||
     path.startsWith("/retry")
   ) {
