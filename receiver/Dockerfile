@@ -45,6 +45,11 @@ RUN bun install --frozen-lockfile --production
 
 # Copy server source files
 COPY *.ts ./
+COPY utils/ ./utils/
+COPY db/ ./db/
+COPY services/ ./services/
+COPY pipeline/ ./pipeline/
+COPY routes/ ./routes/
 
 # Copy built frontend from web-builder stage
 COPY --from=web-builder /app/web/dist ./web/dist
