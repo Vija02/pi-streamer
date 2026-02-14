@@ -15,6 +15,8 @@ import {
   regenerateMp3ForChannel,
   regeneratePeaksForChannel,
 } from "./helpers/regenerate";
+import { deleteSessionFiles, deleteSessionS3Files } from "../services/storage";
+import { deleteSession, getSession } from "../db/sessions";
 
 const logger = createLogger("SessionRoutes");
 
@@ -209,6 +211,68 @@ app.post("/regenerate-peaks-channel", async (c) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return c.json({ error: "Failed to regenerate peaks", message }, 500);
+  }
+});
+
+/**
+ * POST /delete - Delete a session completely (database, local files, S3)
+ */
+app.post("/delete", async (c) => {
+  try {
+    const body = await c.req.json();
+    const sessionId = body.sessionId;
+
+    if (!sessionId) {
+      return c.json({ error: "sessionId is required" }, 400);
+    }
+
+    // Check if session exists
+    const session = getSession(sessionId);
+    if (!session) {
+      return c.json({ error: "Session not found" }, 404);
+    }
+
+    logger.info(`Deleting session: ${sessionId}`);
+
+    const results = {
+      localFiles: false,
+      s3Files: { success: false, deleted: 0, errors: [] as string[] },
+      database: false,
+    };
+
+    // 1. Delete local files
+    results.localFiles = await deleteSessionFiles(sessionId);
+    if (!results.localFiles) {
+      logger.warn(`Failed to delete local files for session ${sessionId}`);
+    }
+
+    // 2. Delete S3 files
+    results.s3Files = await deleteSessionS3Files(sessionId);
+    if (!results.s3Files.success) {
+      logger.warn(`Failed to delete some S3 files for session ${sessionId}: ${results.s3Files.errors.join(", ")}`);
+    }
+
+    // 3. Delete from database
+    results.database = deleteSession(sessionId);
+    if (!results.database) {
+      logger.error(`Failed to delete session ${sessionId} from database`);
+      return c.json({ 
+        error: "Failed to delete session from database",
+        results 
+      }, 500);
+    }
+
+    logger.info(`Successfully deleted session: ${sessionId}`);
+
+    return c.json({
+      success: true,
+      sessionId,
+      results,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error(`Failed to delete session: ${message}`);
+    return c.json({ error: "Failed to delete session", message }, 500);
   }
 });
 

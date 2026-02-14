@@ -158,12 +158,31 @@ export function getSessionStats(sessionId: string): SessionStats {
     )
     .get(sessionId);
 
+  // Get duration from first channel that has it
+  const durationResult = db
+    .query<{ duration: number | null }, [string]>(
+      `SELECT duration_seconds as duration FROM processed_channels 
+       WHERE session_id = ? AND duration_seconds IS NOT NULL
+       LIMIT 1`
+    )
+    .get(sessionId);
+
+  // Get count of non-quiet channels (active channels)
+  const activeChannelResult = db
+    .query<{ count: number }, [string]>(
+      `SELECT COUNT(*) as count FROM processed_channels 
+       WHERE session_id = ? AND is_quiet = 0`
+    )
+    .get(sessionId);
+
   return {
     segmentCount: segmentStats?.count ?? 0,
     channelGroups,
     processedChannelCount: processedStats?.count ?? 0,
     totalSegmentSize: segmentStats?.total_size ?? 0,
     totalProcessedSize: processedStats?.total_size ?? 0,
+    totalDurationSeconds: durationResult?.duration ?? null,
+    activeChannelCount: activeChannelResult?.count ?? 0,
   };
 }
 

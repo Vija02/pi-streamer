@@ -280,3 +280,96 @@ export async function deleteSessionFiles(sessionId: string): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Delete all S3 files for a session using AWS SDK
+ * Lists all objects with session prefixes and deletes them in bulk
+ */
+export async function deleteSessionS3Files(sessionId: string): Promise<{ success: boolean; deleted: number; errors: string[] }> {
+  if (!config.s3.enabled) {
+    logger.debug("S3 disabled, skipping S3 deletion");
+    return { success: true, deleted: 0, errors: [] };
+  }
+
+  // Dynamically import AWS SDK
+  const { S3Client: AwsS3Client, ListObjectsV2Command, DeleteObjectsCommand } = await import("@aws-sdk/client-s3");
+
+  // Ensure endpoint has protocol
+  let endpoint = config.s3.endpoint;
+  if (endpoint && !endpoint.startsWith("http://") && !endpoint.startsWith("https://")) {
+    endpoint = `https://${endpoint}`;
+  }
+
+  const client = new AwsS3Client({
+    region: config.s3.region,
+    endpoint: endpoint,
+    credentials: config.s3.credentials.accessKeyId ? {
+      accessKeyId: config.s3.credentials.accessKeyId,
+      secretAccessKey: config.s3.credentials.secretAccessKey,
+    } : undefined,
+  });
+
+  const errors: string[] = [];
+  let totalDeleted = 0;
+
+  logger.info(`Deleting S3 files for session ${sessionId}`);
+
+  // All prefixes where session files might exist
+  const prefixes = [
+    `${config.s3.prefix}${sessionId}/`,
+    `${config.s3.hlsPrefix}${sessionId}/`,
+    `${config.s3.peaksPrefix}${sessionId}/`,
+  ];
+
+  for (const prefix of prefixes) {
+    try {
+      // List all objects with this prefix
+      let continuationToken: string | undefined;
+      
+      do {
+        const listCommand = new ListObjectsV2Command({
+          Bucket: config.s3.bucket,
+          Prefix: prefix,
+          ContinuationToken: continuationToken,
+        });
+
+        const listResponse = await client.send(listCommand);
+        const objects = listResponse.Contents || [];
+
+        if (objects.length > 0) {
+          // Delete objects in batches of 1000 (S3 limit)
+          const deleteCommand = new DeleteObjectsCommand({
+            Bucket: config.s3.bucket,
+            Delete: {
+              Objects: objects.map(obj => ({ Key: obj.Key! })),
+              Quiet: true,
+            },
+          });
+
+          await client.send(deleteCommand);
+          totalDeleted += objects.length;
+          logger.debug(`Deleted ${objects.length} objects with prefix: ${prefix}`);
+        }
+
+        continuationToken = listResponse.NextContinuationToken;
+      } while (continuationToken);
+
+    } catch (error) {
+      const msg = `Failed to delete S3 files with prefix ${prefix}: ${error}`;
+      logger.error(msg);
+      errors.push(msg);
+    }
+  }
+
+  if (totalDeleted > 0) {
+    logger.info(`Deleted ${totalDeleted} S3 files for session ${sessionId}`);
+  } else {
+    logger.info(`No S3 files found for session ${sessionId}`);
+  }
+
+  return { 
+    success: errors.length === 0, 
+    deleted: totalDeleted, 
+    errors 
+  };
+}

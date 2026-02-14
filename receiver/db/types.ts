@@ -135,6 +135,8 @@ export interface SessionStats {
   processedChannelCount: number;
   totalSegmentSize: number;
   totalProcessedSize: number;
+  totalDurationSeconds: number | null;
+  activeChannelCount: number;
 }
 
 export interface PipelineStats {

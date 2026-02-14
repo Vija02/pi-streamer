@@ -19,6 +19,8 @@ interface Session {
   processedChannelCount: number
   totalSegmentSize: number
   totalProcessedSize: number
+  totalDurationSeconds: number | null
+  activeChannelCount: number
 }
 
 interface Channel {
@@ -61,8 +63,45 @@ function formatDuration(seconds: number | null): string {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
-function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleString()
+function formatSessionTitle(dateStr: string): string {
+  const date = new Date(dateStr)
+  
+  // Format: Sunday, 8 Feb - 10:30am
+  const dayName = date.toLocaleDateString('en-US', { weekday: 'long' })
+  const day = date.getDate()
+  const month = date.toLocaleDateString('en-US', { month: 'short' })
+  
+  let hours = date.getHours()
+  const minutes = date.getMinutes().toString().padStart(2, '0')
+  const ampm = hours >= 12 ? 'pm' : 'am'
+  hours = hours % 12 || 12
+  
+  return `${dayName}, ${day} ${month} - ${hours}:${minutes}${ampm}`
+}
+
+function formatShortDate(dateStr: string): string {
+  const date = new Date(dateStr)
+  const day = date.getDate().toString().padStart(2, '0')
+  const month = (date.getMonth() + 1).toString().padStart(2, '0')
+  const year = date.getFullYear()
+  return `${day}/${month}/${year}`
+}
+
+function formatFullDate(dateStr: string): string {
+  const date = new Date(dateStr)
+  
+  // Format: Sunday, 8 February 2026, 10:30am
+  const dayName = date.toLocaleDateString('en-US', { weekday: 'long' })
+  const day = date.getDate()
+  const month = date.toLocaleDateString('en-US', { month: 'long' })
+  const year = date.getFullYear()
+  
+  let hours = date.getHours()
+  const minutes = date.getMinutes().toString().padStart(2, '0')
+  const ampm = hours >= 12 ? 'pm' : 'am'
+  hours = hours % 12 || 12
+  
+  return `${dayName}, ${day} ${month} ${year}, ${hours}:${minutes}${ampm}`
 }
 
 const statusColors: Record<Session['status'], string> = {
@@ -71,6 +110,72 @@ const statusColors: Record<Session['status'], string> = {
   processing: 'bg-violet-500',
   processed: 'bg-emerald-500',
   failed: 'bg-red-500',
+}
+
+// Confirmation Modal Component
+function ConfirmModal({
+  isOpen,
+  title,
+  message,
+  confirmLabel = 'Confirm',
+  cancelLabel = 'Cancel',
+  onConfirm,
+  onCancel,
+  isLoading = false,
+  variant = 'danger',
+}: {
+  isOpen: boolean
+  title: string
+  message: string
+  confirmLabel?: string
+  cancelLabel?: string
+  onConfirm: () => void
+  onCancel: () => void
+  isLoading?: boolean
+  variant?: 'danger' | 'warning'
+}) {
+  if (!isOpen) return null
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      {/* Backdrop */}
+      <div 
+        className="absolute inset-0 bg-black/60" 
+        onClick={onCancel}
+      />
+      
+      {/* Modal */}
+      <div className="relative bg-slate-800 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+        <h3 className="text-lg font-semibold mb-2">{title}</h3>
+        <p className="text-slate-400 mb-6">{message}</p>
+        
+        <div className="flex justify-end gap-3">
+          <Button
+            variant="outline"
+            onClick={onCancel}
+            disabled={isLoading}
+          >
+            {cancelLabel}
+          </Button>
+          <Button
+            className={variant === 'danger' ? 'bg-red-600 hover:bg-red-700' : 'bg-amber-600 hover:bg-amber-700'}
+            onClick={onConfirm}
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <>
+                <svg className="animate-spin h-4 w-4 mr-2" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                Deleting...
+              </>
+            ) : confirmLabel}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function StatusBadge({ status }: { status: Session['status'] }) {
@@ -118,21 +223,28 @@ function SessionsList({
                   selectedSessionId === session.id ? 'bg-blue-500' : ''
                 }`}
               >
-                <div className="flex justify-between items-center mb-2">
-                  <span className="font-medium text-sm overflow-hidden text-ellipsis whitespace-nowrap max-w-[180px]">
-                    {session.id}
+                <div className="flex justify-between items-center mb-1">
+                  <span className="font-medium text-sm overflow-hidden text-ellipsis whitespace-nowrap flex-1 mr-2">
+                    {formatSessionTitle(session.created_at)}
                   </span>
                   <StatusBadge status={session.status} />
                 </div>
                 <div
-                  className={`flex flex-wrap gap-x-3 gap-y-1 text-xs ${
+                  className={`flex flex-col gap-0.5 text-xs ${
                     selectedSessionId === session.id ? 'text-blue-200' : 'text-slate-400'
                   }`}
                 >
-                  <span>{formatDate(session.created_at)}</span>
-                  <span>{session.segmentCount} segments</span>
+                  <span>
+                    {formatShortDate(session.created_at)}
+                    {session.totalDurationSeconds !== null && ` | Duration: ${formatDuration(session.totalDurationSeconds)}`}
+                  </span>
                   {session.status === 'processed' && (
-                    <span>{session.processedChannelCount} channels</span>
+                    <span>
+                      {session.activeChannelCount > 0 
+                        ? `${session.activeChannelCount} active channel${session.activeChannelCount !== 1 ? 's' : ''}` 
+                        : 'No active channels'}
+                      {' | '}{formatBytes(session.totalProcessedSize)}
+                    </span>
                   )}
                 </div>
               </Link>
@@ -284,7 +396,6 @@ function AudioPlayer({
             Quiet
           </span>
         )}
-        <span className="text-sm text-slate-400">{formatDuration(channel.durationSeconds)}</span>
         <span className="text-sm text-slate-400">{formatBytes(channel.fileSize)}</span>
       </div>
 
@@ -405,9 +516,11 @@ function SessionDetail({
   onRegenerateAllMp3s,
   onRegenerateChannelMp3,
   onRegenerateChannelPeaks,
+  onDeleteSession,
   isLoading,
   isRegeneratingHlsPeaks,
   isRegeneratingAllMp3s,
+  isDeleting,
   regeneratingChannels,
   regeneratingPeaksChannels,
 }: {
@@ -418,13 +531,16 @@ function SessionDetail({
   onRegenerateAllMp3s: () => void
   onRegenerateChannelMp3: (channelNumber: number) => void
   onRegenerateChannelPeaks: (channelNumber: number) => void
+  onDeleteSession: () => void
   isLoading: boolean
   isRegeneratingHlsPeaks: boolean
   isRegeneratingAllMp3s: boolean
+  isDeleting: boolean
   regeneratingChannels: Set<number>
   regeneratingPeaksChannels: Set<number>
 }) {
   const [showSilentChannels, setShowSilentChannels] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   
   // Filter channels - hide silent channels unless showSilentChannels is true
   const visibleChannels = channels.filter(c => showSilentChannels || !c.isSilent)
@@ -450,15 +566,21 @@ function SessionDetail({
       </Link>
 
       <div className="flex flex-wrap items-center gap-4 mb-6">
-        <h2 className="text-xl sm:text-2xl font-semibold break-all">{session.id}</h2>
+        <h2 className="text-xl sm:text-2xl font-semibold break-all">{formatSessionTitle(session.created_at)}</h2>
         <StatusBadge status={session.status} />
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-4 bg-slate-800 p-4 rounded-lg mb-6">
         <div className="flex flex-col gap-1">
           <label className="text-xs text-slate-500 uppercase">Created</label>
-          <span className="text-sm font-medium">{formatDate(session.created_at)}</span>
+          <span className="text-sm font-medium">{formatFullDate(session.created_at)}</span>
         </div>
+        {session.totalDurationSeconds !== null && (
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-slate-500 uppercase">Duration</label>
+            <span className="text-sm font-medium">{formatDuration(session.totalDurationSeconds)}</span>
+          </div>
+        )}
         <div className="flex flex-col gap-1">
           <label className="text-xs text-slate-500 uppercase">Sample Rate</label>
           <span className="text-sm font-medium">{session.sample_rate} Hz</span>
@@ -549,6 +671,16 @@ function SessionDetail({
                   Generate HLS/Peaks ({channelsMissingHlsOrPeaks})
                 </SimpleDropdownItem>
               )}
+              <div className="my-1 h-px bg-slate-600" />
+              <SimpleDropdownItem 
+                onClick={() => setShowDeleteConfirm(true)}
+                className="text-red-400 hover:text-red-300"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+                Delete Session
+              </SimpleDropdownItem>
             </SimpleDropdown>
           </div>
           <div className="flex flex-col gap-3">
@@ -588,6 +720,22 @@ function SessionDetail({
       {session.status === 'processed' && channels.length === 0 && (
         <div className="text-slate-500 p-4 text-center">No processed channels found</div>
       )}
+
+      {/* Delete Confirmation Modal */}
+      <ConfirmModal
+        isOpen={showDeleteConfirm}
+        title="Delete Session"
+        message={`Are you sure you want to delete this session? This will permanently remove all files from local storage and S3. This action cannot be undone.`}
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        onConfirm={() => {
+          onDeleteSession()
+          setShowDeleteConfirm(false)
+        }}
+        onCancel={() => setShowDeleteConfirm(false)}
+        isLoading={isDeleting}
+        variant="danger"
+      />
     </div>
   )
 }
@@ -607,6 +755,7 @@ function SessionPage({
   const [isRegeneratingAllMp3s, setIsRegeneratingAllMp3s] = useState(false)
   const [regeneratingChannels, setRegeneratingChannels] = useState<Set<number>>(new Set())
   const [regeneratingPeaksChannels, setRegeneratingPeaksChannels] = useState<Set<number>>(new Set())
+  const [isDeleting, setIsDeleting] = useState(false)
   const [, setLocation] = useLocation()
 
   const session = sessions.find((s) => s.id === sessionId)
@@ -774,6 +923,35 @@ function SessionPage({
     }
   }
 
+  // Delete session
+  const deleteSession = async () => {
+    if (!sessionId) return
+
+    setIsDeleting(true)
+    try {
+      const response = await fetch(`${API_BASE}/session/delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId }),
+      })
+      const result = await response.json()
+      
+      if (result.success) {
+        // Refresh sessions and navigate to home
+        fetchSessions()
+        setLocation('/')
+      } else {
+        console.error('Delete failed:', result.error)
+        alert(`Failed to delete session: ${result.error || 'Unknown error'}`)
+      }
+    } catch (err) {
+      console.error('Failed to delete session:', err)
+      alert('Failed to delete session')
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
   useEffect(() => {
     if (sessionId) {
       fetchChannels(sessionId)
@@ -806,9 +984,11 @@ function SessionPage({
       onRegenerateAllMp3s={regenerateAllMp3s}
       onRegenerateChannelMp3={regenerateChannelMp3}
       onRegenerateChannelPeaks={regenerateChannelPeaks}
+      onDeleteSession={deleteSession}
       isLoading={isLoading}
       isRegeneratingHlsPeaks={isRegeneratingHlsPeaks}
       isRegeneratingAllMp3s={isRegeneratingAllMp3s}
+      isDeleting={isDeleting}
       regeneratingChannels={regeneratingChannels}
       regeneratingPeaksChannels={regeneratingPeaksChannels}
     />
