@@ -214,6 +214,50 @@ export async function getSourcePorts(): Promise<string[]> {
 }
 
 /**
+ * Setup laptop audio routing to XR18
+ * Connects laptop capture ports to XR18 playback ports (e.g., to send laptop audio to XR18 channel 10)
+ */
+export async function setupLaptopRouting(): Promise<{ ok: boolean; errors: string[] }> {
+  const config = getConfig();
+  
+  if (!config.laptopRouteEnabled) {
+    logger.debug("Laptop routing is disabled");
+    return { ok: true, errors: [] };
+  }
+
+  logger.info({
+    leftSrc: config.laptopCaptureLeft,
+    rightSrc: config.laptopCaptureRight,
+    leftDst: config.xr18PlaybackLeft,
+    rightDst: config.xr18PlaybackRight,
+  }, "Setting up laptop audio routing to XR18");
+
+  const errors: string[] = [];
+
+  // Connect left channel
+  const leftResult = await jackConnect(config.laptopCaptureLeft, config.xr18PlaybackLeft);
+  if (!leftResult.ok) {
+    const errMsg = `Failed to connect left channel: ${leftResult.error}`;
+    logger.error(errMsg);
+    errors.push(errMsg);
+  } else {
+    logger.info({ src: config.laptopCaptureLeft, dst: config.xr18PlaybackLeft }, "Connected left channel");
+  }
+
+  // Connect right channel
+  const rightResult = await jackConnect(config.laptopCaptureRight, config.xr18PlaybackRight);
+  if (!rightResult.ok) {
+    const errMsg = `Failed to connect right channel: ${rightResult.error}`;
+    logger.error(errMsg);
+    errors.push(errMsg);
+  } else {
+    logger.info({ src: config.laptopCaptureRight, dst: config.xr18PlaybackRight }, "Connected right channel");
+  }
+
+  return { ok: errors.length === 0, errors };
+}
+
+/**
  * Get capture ports that match filter criteria
  */
 export async function getCapturePorts(): Promise<string[]> {

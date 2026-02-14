@@ -107,7 +107,7 @@ Environment variables:
   RECORDING_DIR         - Local directory (default: ./recordings)
   SAMPLE_RATE           - Audio sample rate (default: 48000)
   CHANNELS              - Number of channels (default: 18)
-  JACK_PORT_PREFIX      - JACK port prefix (default: system:capture_)
+  JACK_PORT_PREFIX      - JACK port prefix (default: XR18 Multichannel:capture_AUX)
   SESSION_ID            - Session identifier (default: timestamp)
   SEGMENT_DURATION      - Segment length in seconds (default: 30)
   UPLOAD_ENABLED        - Enable server upload (default: true)
@@ -126,6 +126,13 @@ JACK auto-start settings:
   JACK_PERIOD_SIZE      - JACK period size (default: 2048)
   JACK_NPERIODS         - JACK number of periods (default: 3)
   JACK_STARTUP_WAIT_MS  - Time to wait for JACK startup (default: 3000)
+
+Laptop audio routing (send laptop output to XR18 input):
+  LAPTOP_ROUTE_ENABLED  - Enable laptop routing (default: true)
+  LAPTOP_CAPTURE_LEFT   - Laptop left capture port (default: Built-in Audio Analog Stereo:capture_FL)
+  LAPTOP_CAPTURE_RIGHT  - Laptop right capture port (default: Built-in Audio Analog Stereo:capture_FR)
+  XR18_PLAYBACK_LEFT    - XR18 playback port for left (default: XR18 Multichannel:playback_AUX9)
+  XR18_PLAYBACK_RIGHT   - XR18 playback port for right (default: XR18 Multichannel:playback_AUX9)
 `);
     return;
   }

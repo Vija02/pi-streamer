@@ -13,7 +13,7 @@ import { $, spawn, type Subprocess } from "bun"
 import { join } from "path"
 import { getConfig } from "./config"
 import { recordingLogger as logger } from "./logger"
-import { checkJackSetup, getSourcePorts, stopJackServer } from "./jack"
+import { checkJackSetup, getSourcePorts, stopJackServer, setupLaptopRouting } from "./jack"
 import { waitForQueueEmpty, getQueueLength } from "./upload"
 import { startWatcher, stopWatcher } from "./watcher"
 
@@ -88,8 +88,8 @@ function buildJackCaptureArgs(sessionDir: string): string[] {
 		"--no-stdin",          // Don't read from stdin (prevents immediate exit)
 	]
 
-	// Add port arguments for each channel
-	for (let i = 1; i <= channels; i++) {
+	// Add port arguments for each channel (0-indexed for XR18 AUX ports)
+	for (let i = 0; i < channels; i++) {
 		args.push("-p", `${jackPortPrefix}${i}`)
 	}
 
@@ -125,6 +125,12 @@ export async function startRecording(): Promise<void> {
 			},
 			"Found fewer source ports than configured channels",
 		)
+	}
+
+	// Setup laptop audio routing if enabled
+	const laptopRouting = await setupLaptopRouting()
+	if (config.laptopRouteEnabled && !laptopRouting.ok) {
+		logger.warn({ errors: laptopRouting.errors }, "Some laptop routing connections failed")
 	}
 
 	// Create session directory

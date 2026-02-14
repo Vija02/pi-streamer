@@ -17,6 +17,13 @@ export interface Config {
   // JACK port prefix (adjust based on your JACK setup)
   jackPortPrefix: string;
 
+  // Laptop audio routing to XR18
+  laptopRouteEnabled: boolean;
+  laptopCaptureLeft: string;
+  laptopCaptureRight: string;
+  xr18PlaybackLeft: string;
+  xr18PlaybackRight: string;
+
   // Segment duration in seconds
   segmentDuration: number;
 
@@ -49,7 +56,14 @@ export function loadConfig(): Config {
     channels: Number(process.env.CHANNELS) || 18,
 
     // JACK port prefix
-    jackPortPrefix: process.env.JACK_PORT_PREFIX || "system:capture_",
+    jackPortPrefix: process.env.JACK_PORT_PREFIX || "XR18 Multichannel:capture_AUX",
+
+    // Laptop audio routing to XR18 (connects laptop output to XR18 input channel 10)
+    laptopRouteEnabled: process.env.LAPTOP_ROUTE_ENABLED !== "false",
+    laptopCaptureLeft: process.env.LAPTOP_CAPTURE_LEFT || "Built-in Audio Analog Stereo:capture_FL",
+    laptopCaptureRight: process.env.LAPTOP_CAPTURE_RIGHT || "Built-in Audio Analog Stereo:capture_FR",
+    xr18PlaybackLeft: process.env.XR18_PLAYBACK_LEFT || "XR18 Multichannel:playback_AUX9",
+    xr18PlaybackRight: process.env.XR18_PLAYBACK_RIGHT || "XR18 Multichannel:playback_AUX9",
 
     // Segment duration in seconds
     segmentDuration: Number(process.env.SEGMENT_DURATION) || 30,

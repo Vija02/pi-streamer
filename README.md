@@ -125,7 +125,7 @@ bun run src/index.ts test
 
 # Configure (adjust JACK_PORT_PREFIX if needed)
 export STREAM_URL="http://your-server:3000/stream"
-export JACK_PORT_PREFIX="system:capture_"
+export JACK_PORT_PREFIX="XR18 Multichannel:capture_AUX"
 
 # Start recording
 bun run start
@@ -194,7 +194,7 @@ docker run -d \
 | `RECORDING_DIR`         | `./recordings`                 | Local recording directory                    |
 | `SAMPLE_RATE`           | `48000`                        | Audio sample rate                            |
 | `CHANNELS`              | `18`                           | Number of channels                           |
-| `JACK_PORT_PREFIX`      | `system:capture_`              | JACK port prefix                             |
+| `JACK_PORT_PREFIX`      | `XR18 Multichannel:capture_AUX` | JACK port prefix                             |
 | `SESSION_ID`            | (timestamp)                    | Unique session ID                            |
 | `SEGMENT_DURATION`      | `30`                           | Segment length in seconds                    |
 | `UPLOAD_ENABLED`        | `true`                         | Enable server upload                         |
