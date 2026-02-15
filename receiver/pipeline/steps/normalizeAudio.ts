@@ -134,8 +134,13 @@ export class NormalizeAudioStep extends BaseStep {
           `[${result.inputLufs.toFixed(1)} -> ${result.outputLufs} LUFS, mode=${normalizationMode}]`
       );
 
+      // After normalization, the audio is no longer silent - clear the flag
+      // so that downstream steps (peaks, HLS) will process this channel
       return this.success(
-        { normalizedPath },
+        { 
+          normalizedPath,
+          isSilent: false,  // Audio is now audible after normalization
+        },
         { 
           durationMs, 
           inputLufs: result.inputLufs, 
