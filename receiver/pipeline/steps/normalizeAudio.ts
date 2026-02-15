@@ -7,7 +7,7 @@
 import { mkdir, unlink } from "fs/promises";
 import { BaseStep } from "./base";
 import type { StepContext, PipelineData, StepResult } from "../types";
-import { applyLoudnessNormalization } from "../../utils/ffmpeg";
+import { applyLoudnessNormalization, applyHighGainNormalization } from "../../utils/ffmpeg";
 import { getNormalizedChannelPath } from "../../utils/paths";
 import { config } from "../../config";
 
@@ -66,12 +66,7 @@ export class NormalizeAudioStep extends BaseStep {
     }
 
     const { targetLufs, targetTruePeak, targetLra } = config.processing.normalization;
-    const currentLufs = data.audioStats.integratedLoudness;
-
-    this.logger.info(
-      `Normalizing channel ${channelNumber}: ${currentLufs.toFixed(1)} LUFS -> ${targetLufs} LUFS ` +
-        `(target TP: ${targetTruePeak}dB)`
-    );
+    const { integratedLoudness } = data.audioStats;
 
     // Ensure work directory exists
     await mkdir(workDir, { recursive: true });
@@ -80,17 +75,55 @@ export class NormalizeAudioStep extends BaseStep {
 
     try {
       const normalizedPath = getNormalizedChannelPath(sessionId, channelNumber);
+      let result: { inputLufs: number; outputLufs: number };
+      let normalizationMode: string;
 
-      const result = await applyLoudnessNormalization(
-        inputPath,
-        normalizedPath,
-        targetLufs,
-        targetTruePeak,
-        targetLra,
-        data.audioStats.integratedLoudness,
-        data.audioStats.truePeak,
-        data.audioStats.loudnessRange
-      );
+      // Calculate required gain
+      const gainNeeded = targetLufs - integratedLoudness;
+      
+      // Use gain-based normalization when required gain is large.
+      // FFmpeg's loudnorm with dynamic mode limits gain to prevent amplifying silence/noise.
+      // For audio that needs significant boost (>20dB), it typically fails to reach target.
+      // In these cases, we use simple gain + limiter which properly amplifies the content.
+      const highGainThreshold = config.processing.normalization.highGainThresholdDb;
+      const useGainMode = gainNeeded > highGainThreshold;
+
+      if (useGainMode) {
+        this.logger.info(
+          `Using gain-based normalization for channel ${channelNumber}: ` +
+            `${gainNeeded.toFixed(1)}dB gain needed (> ${highGainThreshold}dB threshold). ` +
+            `${integratedLoudness.toFixed(1)} LUFS -> ${targetLufs} LUFS`
+        );
+
+        // Apply simple gain + limiter to bring integrated loudness to target
+        await applyHighGainNormalization(
+          inputPath,
+          normalizedPath,
+          gainNeeded,
+          targetTruePeak
+        );
+
+        result = { inputLufs: integratedLoudness, outputLufs: targetLufs };
+        normalizationMode = "high-gain";
+      } else {
+        // Normal LUFS-based normalization for continuous audio with moderate gain
+        this.logger.info(
+          `Normalizing channel ${channelNumber}: ${integratedLoudness.toFixed(1)} LUFS -> ${targetLufs} LUFS ` +
+            `(target TP: ${targetTruePeak}dB)`
+        );
+
+        result = await applyLoudnessNormalization(
+          inputPath,
+          normalizedPath,
+          targetLufs,
+          targetTruePeak,
+          targetLra,
+          data.audioStats.integratedLoudness,
+          data.audioStats.truePeak,
+          data.audioStats.loudnessRange
+        );
+        normalizationMode = "lufs";
+      }
 
       const durationMs = Date.now() - startTime;
       const file = Bun.file(normalizedPath);
@@ -98,7 +131,7 @@ export class NormalizeAudioStep extends BaseStep {
 
       this.logger.info(
         `Normalized to ${normalizedPath} (${(fileSize / 1024 / 1024).toFixed(2)} MB) in ${durationMs}ms ` +
-          `[${result.inputLufs.toFixed(1)} -> ${result.outputLufs} LUFS]`
+          `[${result.inputLufs.toFixed(1)} -> ${result.outputLufs} LUFS, mode=${normalizationMode}]`
       );
 
       return this.success(
@@ -107,7 +140,8 @@ export class NormalizeAudioStep extends BaseStep {
           durationMs, 
           inputLufs: result.inputLufs, 
           outputLufs: result.outputLufs,
-          bytesProcessed: fileSize 
+          bytesProcessed: fileSize,
+          normalizationMode,
         }
       );
     } catch (error) {

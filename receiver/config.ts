@@ -50,6 +50,10 @@ export const config = {
       targetLufs: Number(process.env.NORMALIZE_TARGET_LUFS ?? -16),
       targetTruePeak: Number(process.env.NORMALIZE_TRUE_PEAK ?? -1.5),
       targetLra: Number(process.env.NORMALIZE_LRA ?? 11),
+      // When required gain exceeds this threshold, use gain+limiter instead of loudnorm.
+      // loudnorm's dynamic mode won't apply large gains, so we need to fall back to
+      // simple gain for quiet audio that needs significant boosting.
+      highGainThresholdDb: Number(process.env.NORMALIZE_HIGH_GAIN_THRESHOLD ?? 20),
     },
     analysis: {
       quietThresholdDb: Number(process.env.QUIET_CHANNEL_THRESHOLD_DB) || -40,

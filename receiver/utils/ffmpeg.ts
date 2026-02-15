@@ -46,7 +46,7 @@ export interface AudioStats {
 
 /**
  * Analyze audio file to get volume and loudness statistics
- * Uses both volumedetect and loudnorm for comprehensive analysis
+ * Uses volumedetect and loudnorm for comprehensive analysis.
  */
 export async function analyzeAudio(
   filePath: string,
@@ -88,7 +88,14 @@ export async function analyzeAudio(
 
     const isQuiet = maxVolume < quietThresholdDb;
 
-    return { maxVolume, meanVolume, integratedLoudness, truePeak, loudnessRange, isQuiet };
+    return { 
+      maxVolume, 
+      meanVolume, 
+      integratedLoudness, 
+      truePeak, 
+      loudnessRange, 
+      isQuiet,
+    };
   } catch (err) {
     logger.error(`Failed to analyze audio: ${err}`);
     return { 
@@ -97,7 +104,7 @@ export async function analyzeAudio(
       integratedLoudness: -24,
       truePeak: -1,
       loudnessRange: 7,
-      isQuiet: false 
+      isQuiet: false,
     };
   }
 }
@@ -348,5 +355,34 @@ export async function applyVolumeGain(
   if (result.exitCode !== 0) {
     const stderr = result.stderr.toString();
     throw new Error(`Failed to apply volume gain: exit code ${result.exitCode}, stderr: ${stderr}`);
+  }
+}
+
+/**
+ * Apply gain-based normalization for audio that needs large gain adjustments.
+ * Uses simple gain + limiter instead of loudnorm.
+ * 
+ * FFmpeg's loudnorm filter with dynamic mode won't apply large gains (>20dB) because
+ * it tries to avoid amplifying silence/noise. For quiet audio that needs significant
+ * boosting, we use simple gain + limiter which properly amplifies the content.
+ */
+export async function applyHighGainNormalization(
+  inputPath: string,
+  outputPath: string,
+  gainDb: number,
+  targetTruePeak: number = -1.5
+): Promise<void> {
+  // Apply gain and use alimiter to prevent clipping
+  // alimiter is a look-ahead limiter that handles transients well
+  const filter = `volume=${gainDb.toFixed(2)}dB,alimiter=limit=${targetTruePeak}dB:attack=5:release=50:level=false`;
+
+  logger.debug(`Applying sparse audio normalization: ${gainDb.toFixed(1)}dB gain with limiter at ${targetTruePeak}dB`);
+
+  const result =
+    await $`ffmpeg -y -i ${inputPath} -af ${filter} -c:a flac ${outputPath}`.quiet();
+
+  if (result.exitCode !== 0) {
+    const stderr = result.stderr.toString();
+    throw new Error(`Failed to apply sparse audio normalization: exit code ${result.exitCode}, stderr: ${stderr}`);
   }
 }
