@@ -19,6 +19,7 @@ export {
   regenerateChannelMedia,
   processChannelWithPipeline,
   cleanupTempFiles,
+  cleanupChannelTempFiles,
 } from "./channelProcessor";
 
 // Session processor

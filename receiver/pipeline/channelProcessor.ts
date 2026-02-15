@@ -248,6 +248,41 @@ export async function processChannelWithPipeline(
 }
 
 /**
+ * Clean up temp files for a specific channel
+ */
+export async function cleanupChannelTempFiles(
+  sessionId: string,
+  channelNumber: number
+): Promise<void> {
+  const tempDir = getTempDir(sessionId);
+  const { readdir } = await import("fs/promises");
+
+  try {
+    const files = await readdir(tempDir);
+    const channelPattern = new RegExp(`_ch${channelNumber}\\.flac$|^concat_ch${channelNumber}\\.flac$|^normalized_ch${channelNumber}\\.flac$`);
+    
+    let deletedCount = 0;
+    for (const file of files) {
+      if (channelPattern.test(file)) {
+        try {
+          await rm(`${tempDir}/${file}`, { force: true });
+          deletedCount++;
+        } catch {
+          // Ignore individual file deletion errors
+        }
+      }
+    }
+    
+    if (deletedCount > 0) {
+      logger.debug(`Cleaned up ${deletedCount} temp files for channel ${channelNumber}`);
+    }
+  } catch (error) {
+    // Directory might not exist, that's fine
+    logger.debug(`No temp files to clean for channel ${channelNumber}`);
+  }
+}
+
+/**
  * Clean up temp files for a session
  */
 export async function cleanupTempFiles(sessionId: string): Promise<void> {

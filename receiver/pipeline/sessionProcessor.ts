@@ -6,7 +6,7 @@
 import { createLogger } from "../utils/logger";
 import { getSession, updateSessionStatus } from "../db/sessions";
 import { getSessionSegments } from "../db/segments";
-import { processChannel, cleanupTempFiles } from "./channelProcessor";
+import { processChannel, cleanupTempFiles, cleanupChannelTempFiles } from "./channelProcessor";
 import type { PipelineOptions, SessionProcessorResult } from "./types";
 
 const logger = createLogger("SessionProcessor");
@@ -103,6 +103,9 @@ export async function processSession(
       } else {
         logger.error(`Channel ${channelNum} failed: ${result.error}`);
       }
+
+      // Clean up temp files for this channel immediately
+      await cleanupChannelTempFiles(sessionId, channelNum);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       logger.error(`Channel ${channelNum} error: ${errorMessage}`);
@@ -112,6 +115,9 @@ export async function processSession(
         channelNumber: channelNum,
         error: errorMessage,
       });
+
+      // Still clean up temp files even on error
+      await cleanupChannelTempFiles(sessionId, channelNum);
     }
   }
 
