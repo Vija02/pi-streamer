@@ -83,20 +83,42 @@ export class UploadHlsStep extends BaseStep {
 
       totalBytes += playlistData.byteLength;
 
-      // Upload all segments
+      // Upload all segments with limited concurrency
       if (data.hlsSegmentPaths && data.hlsSegmentPaths.length > 0) {
-        this.logger.debug(`Uploading ${data.hlsSegmentPaths.length} HLS segments...`);
+        const CONCURRENCY_LIMIT = 10;
+        const segments = data.hlsSegmentPaths;
+        const totalSegments = segments.length;
+        let uploadedCount = 0;
+        let lastLoggedPercent = 0;
 
-        for (const segPath of data.hlsSegmentPaths) {
-          const segName = basename(segPath);
-          const segS3Key = getHlsSegmentS3Key(sessionId, segName);
-          const segData = await Bun.file(segPath).arrayBuffer();
+        this.logger.debug(
+          `Uploading ${totalSegments} HLS segments (concurrency: ${CONCURRENCY_LIMIT})...`
+        );
 
-          await this.s3Client
-            .file(segS3Key, { type: "video/mp2t" })
-            .write(new Uint8Array(segData));
+        for (let i = 0; i < segments.length; i += CONCURRENCY_LIMIT) {
+          const batch = segments.slice(i, i + CONCURRENCY_LIMIT);
+          const batchResults = await Promise.all(
+            batch.map(async (segPath) => {
+              const segName = basename(segPath);
+              const segS3Key = getHlsSegmentS3Key(sessionId, segName);
+              const segData = await Bun.file(segPath).arrayBuffer();
 
-          totalBytes += segData.byteLength;
+              await this.s3Client!
+                .file(segS3Key, { type: "video/mp2t" })
+                .write(new Uint8Array(segData));
+
+              return segData.byteLength;
+            })
+          );
+
+          totalBytes += batchResults.reduce((sum, bytes) => sum + bytes, 0);
+          uploadedCount += batch.length;
+
+          const percent = Math.floor((uploadedCount / totalSegments) * 100);
+          if (percent >= lastLoggedPercent + 10) {
+            lastLoggedPercent = Math.floor(percent / 10) * 10;
+            this.logger.debug(`HLS upload progress: ${lastLoggedPercent}% (${uploadedCount}/${totalSegments})`);
+          }
         }
       }
 
