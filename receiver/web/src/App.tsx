@@ -1049,6 +1049,30 @@ function MultiChannelPlayer({
     return () => clearInterval(syncInterval)
   }, [isPlaying, loadedChannels])
 
+  // Keyboard shortcuts (spacebar to play/pause)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger if user is typing in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return
+      }
+      
+      if (e.code === 'Space') {
+        e.preventDefault()
+        if (loadedChannels.size === channels.length) {
+          if (isPlaying) {
+            pauseAll()
+          } else {
+            playAll()
+          }
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isPlaying, loadedChannels.size, channels.length])
+
   // Synchronize all audio elements to a target time
   const syncAllToTime = (targetTime: number) => {
     audioRefs.current.forEach((audio) => {
