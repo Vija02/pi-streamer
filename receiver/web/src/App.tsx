@@ -334,6 +334,8 @@ function ChannelStrip({
   waveformRef,
   isLoaded,
   error,
+  onSeek,
+  duration,
 }: { 
   channel: Channel
   volume: number
@@ -347,6 +349,8 @@ function ChannelStrip({
   waveformRef: (el: HTMLDivElement | null) => void
   isLoaded: boolean
   error: string | null
+  onSeek: (time: number) => void
+  duration: number
 }) {
   const [isEditingVolume, setIsEditingVolume] = useState(false)
   const [editValue, setEditValue] = useState('')
@@ -486,7 +490,17 @@ function ChannelStrip({
       </SimpleDropdown>
 
       {/* Waveform - clickable to seek */}
-      <div className="flex-1 min-w-0">
+      <div 
+        className="flex-1 min-w-0 relative"
+        onClick={(e) => {
+          if (!isLoaded || duration <= 0) return
+          const rect = e.currentTarget.getBoundingClientRect()
+          const clickX = e.clientX - rect.left
+          const percentage = clickX / rect.width
+          const newTime = percentage * duration
+          onSeek(Math.max(0, Math.min(duration, newTime)))
+        }}
+      >
         {!isLoaded && (
           <div className="w-full rounded bg-slate-900 h-[40px] flex items-center justify-center">
             {error ? (
@@ -676,7 +690,7 @@ function MultiChannelPlayer({
       sourceNode.connect(gainNode)
       gainNode.connect(audioContext.destination)
 
-      // Create WaveSurfer
+      // Create WaveSurfer - interact disabled, we handle click-to-seek manually
       const ws = WaveSurfer.create({
         container,
         waveColor: '#64748b',
@@ -691,38 +705,12 @@ function MultiChannelPlayer({
         media: audio,
         peaks: [peaksData.data],
         duration: channel.durationSeconds || peaksData.length / peaksData.sample_rate,
-        interact: true, // Enable click-to-seek on waveform
+        interact: false, // Disabled - we handle click-to-seek manually in ChannelStrip
       })
 
       ws.on('ready', () => {
         const dur = ws.getDuration()
         setDuration(prev => Math.max(prev, dur))
-      })
-
-      // Handle click-to-seek - sync all channels when one is clicked
-      ws.on('seeking', (seekTime: number) => {
-        if (isSeeking.current) return // Prevent feedback loop
-        isSeeking.current = true
-        
-        // Sync all audio elements to the new time
-        audioRefs.current.forEach((a) => {
-          a.currentTime = seekTime
-        })
-        
-        // Update all wavesurfer visuals
-        wavesurferRefs.current.forEach((otherWs, chNum) => {
-          if (chNum !== channel.channelNumber) {
-            const progress = seekTime / otherWs.getDuration()
-            otherWs.seekTo(Math.min(1, Math.max(0, progress)))
-          }
-        })
-        
-        setCurrentTime(seekTime)
-        masterTimeRef.current = seekTime
-        
-        setTimeout(() => {
-          isSeeking.current = false
-        }, 100)
       })
 
       wavesurferRefs.current.set(channel.channelNumber, ws)
@@ -959,6 +947,27 @@ function MultiChannelPlayer({
     })
   }
 
+  // Waveform click-to-seek handler
+  const handleWaveformSeek = (time: number) => {
+    isSeeking.current = true
+    
+    // Sync all audio elements to the new time
+    syncAllToTime(time)
+    
+    // Update wavesurfer visuals
+    wavesurferRefs.current.forEach(ws => {
+      const progress = time / ws.getDuration()
+      ws.seekTo(Math.min(1, Math.max(0, progress)))
+    })
+    
+    setCurrentTime(time)
+    masterTimeRef.current = time
+    
+    setTimeout(() => {
+      isSeeking.current = false
+    }, 100)
+  }
+
   const allLoaded = loadedChannels.size === channels.length
 
   return (
@@ -1076,6 +1085,8 @@ function MultiChannelPlayer({
             waveformRef={handleWaveformRef(channel.channelNumber, channel)}
             isLoaded={loadedChannels.has(channel.channelNumber)}
             error={channelErrors.get(channel.channelNumber) || null}
+            onSeek={handleWaveformSeek}
+            duration={duration}
           />
         ))}
       </div>
