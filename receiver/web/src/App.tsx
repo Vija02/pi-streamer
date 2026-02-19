@@ -1832,7 +1832,7 @@ function SessionDetail({
               <Button
                 onClick={() => setShowChaptersPanel(!showChaptersPanel)}
                 variant={showChaptersPanel ? "default" : "outline"}
-                className={showChaptersPanel ? "bg-blue-600 hover:bg-blue-700" : ""}
+                className={showChaptersPanel ? "bg-slate-600 hover:bg-slate-500" : ""}
               >
                 <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
@@ -1984,6 +1984,15 @@ function SessionDetail({
                     const chapterEnd = nextChapter ? nextChapter.timeSeconds : totalDuration
                     const chapterDuration = chapterEnd - chapter.timeSeconds
                     
+                    // Calculate real clock time
+                    const sessionStart = new Date(session.created_at)
+                    const chapterTime = new Date(sessionStart.getTime() + chapter.timeSeconds * 1000)
+                    const clockTime = chapterTime.toLocaleTimeString('en-US', { 
+                      hour: 'numeric', 
+                      minute: '2-digit',
+                      hour12: true 
+                    }).toLowerCase()
+                    
                     return (
                       <li
                         key={chapter.id}
@@ -1992,13 +2001,16 @@ function SessionDetail({
                           playerRef.current?.seekAndPlay(chapter.timeSeconds)
                         }}
                       >
-                        <span className="font-medium text-sm block truncate">
-                          {chapter.label}
-                        </span>
-                        <div className="flex items-center gap-2 text-xs text-slate-400">
-                          <span>{formatDuration(chapter.timeSeconds)}</span>
-                          <span className="text-slate-600">|</span>
-                          <span>{formatDuration(chapterDuration)}</span>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-medium text-sm truncate">
+                            {chapter.label}
+                          </span>
+                          <span className="text-xs text-slate-400 shrink-0">
+                            {clockTime}
+                          </span>
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          Duration: {formatDuration(chapterDuration)}
                         </div>
                       </li>
                     )
