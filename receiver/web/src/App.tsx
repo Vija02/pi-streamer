@@ -581,6 +581,23 @@ interface TimeMarker {
   color?: string
 }
 
+// API annotation type
+interface ApiAnnotation {
+  id: number
+  timeSeconds: number
+  label: string
+  color: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+// API channel setting type
+interface ApiChannelSetting {
+  channelNumber: number
+  volume: number
+  isMuted: boolean
+}
+
 // Generate clock time markers for round times (every 30 minutes)
 function generateClockTimeMarkers(sessionStartTime: Date, durationSeconds: number): TimeMarker[] {
   const markers: TimeMarker[] = []
@@ -631,11 +648,13 @@ function TimelineMarkers({
   duration,
   currentTime,
   onSeek,
+  onDeleteMarker,
 }: {
   markers: TimeMarker[]
   duration: number
   currentTime: number
   onSeek: (time: number) => void
+  onDeleteMarker?: (markerId: string) => void
 }) {
   if (duration <= 0 || markers.length === 0) return null
   
@@ -648,11 +667,13 @@ function TimelineMarkers({
       <span className="w-[30px] shrink-0" />
       
       {/* Timeline area - matches waveform flex-1 */}
-      <div className="flex-1 min-w-0 relative h-5 bg-slate-900/50 rounded">
+      <div className="flex-1 min-w-0 relative h-6 bg-slate-900/50 rounded">
         {/* Markers */}
         {markers.map((marker) => {
           const position = (marker.time / duration) * 100
           if (position < 0 || position > 100) return null
+          
+          const isUserMarker = marker.type === 'user'
           
           return (
             <div
@@ -660,16 +681,22 @@ function TimelineMarkers({
               className="absolute top-0 bottom-0 flex flex-col items-center cursor-pointer group"
               style={{ left: `${position}%` }}
               onClick={() => onSeek(marker.time)}
-              title={`Jump to ${marker.label}`}
+              title={`Jump to ${marker.label}${isUserMarker ? ' (right-click to delete)' : ''}`}
+              onContextMenu={(e) => {
+                if (isUserMarker && onDeleteMarker) {
+                  e.preventDefault()
+                  onDeleteMarker(marker.id)
+                }
+              }}
             >
               {/* Vertical line */}
               <div 
-                className="w-px h-full group-hover:w-0.5 transition-all"
+                className={`h-full group-hover:w-1 transition-all ${isUserMarker ? 'w-0.5' : 'w-px'}`}
                 style={{ backgroundColor: marker.color || '#64748b' }}
               />
               {/* Label */}
               <span 
-                className="absolute top-0.5 text-[10px] font-medium whitespace-nowrap transform -translate-x-1/2 group-hover:scale-110 transition-transform"
+                className={`absolute text-[10px] font-medium whitespace-nowrap transform -translate-x-1/2 group-hover:scale-110 transition-transform ${isUserMarker ? 'top-1 bg-slate-800/90 px-1 rounded' : 'top-0.5'}`}
                 style={{ color: marker.color || '#64748b' }}
               >
                 {marker.label}
@@ -680,7 +707,7 @@ function TimelineMarkers({
         
         {/* Current time indicator */}
         <div
-          className="absolute top-0 bottom-0 w-0.5 bg-emerald-500 pointer-events-none z-10"
+          className="absolute top-0 bottom-0 w-0.5 bg-white pointer-events-none z-10"
           style={{ left: `${(currentTime / duration) * 100}%` }}
         />
       </div>
@@ -733,6 +760,22 @@ function MultiChannelPlayer({
     return initial
   })
   const [mutedChannels, setMutedChannels] = useState<Set<number>>(new Set())
+  
+  // Refs to track current volume/mute state for use in async callbacks
+  const volumesRef = useRef(volumes)
+  const mutedChannelsRef = useRef(mutedChannels)
+  
+  // Keep refs in sync with state
+  useEffect(() => {
+    volumesRef.current = volumes
+    mutedChannelsRef.current = mutedChannels
+  }, [volumes, mutedChannels])
+
+  // Annotations state
+  const [userAnnotations, setUserAnnotations] = useState<ApiAnnotation[]>([])
+  const [isAddingAnnotation, setIsAddingAnnotation] = useState(false)
+  const [newAnnotationLabel, setNewAnnotationLabel] = useState('')
+  const settingsSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Track if we're currently seeking to prevent feedback loops
   const isSeeking = useRef(false)
@@ -804,7 +847,10 @@ function MultiChannelPlayer({
       
       // Create gain node for volume control (allows > 100%)
       const gainNode = audioContext.createGain()
-      gainNode.gain.value = 1
+      // Apply current volume/mute state from refs (may have been loaded from server)
+      const currentVolume = volumesRef.current.get(channel.channelNumber) ?? 1
+      const isMuted = mutedChannelsRef.current.has(channel.channelNumber)
+      gainNode.gain.value = isMuted ? 0 : currentVolume
       gainNodesRef.current.set(channel.channelNumber, gainNode)
       
       // Connect: source -> gain -> destination
@@ -856,6 +902,63 @@ function MultiChannelPlayer({
     }
   }
 
+  // Load annotations and channel settings on mount
+  useEffect(() => {
+    const loadAnnotations = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/sessions/${sessionId}/annotations`)
+        if (response.ok) {
+          const data = await response.json()
+          setUserAnnotations(data.annotations || [])
+        }
+      } catch (err) {
+        console.error('Failed to load annotations:', err)
+      }
+    }
+
+    const loadChannelSettings = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/sessions/${sessionId}/channel-settings`)
+        if (response.ok) {
+          const data = await response.json()
+          const settings: ApiChannelSetting[] = data.settings || []
+          
+          // Apply loaded settings
+          const newVolumes = new Map<number, number>()
+          const newMuted = new Set<number>()
+          
+          // Start with defaults
+          channels.forEach(ch => newVolumes.set(ch.channelNumber, 1))
+          
+          // Apply saved settings
+          settings.forEach(s => {
+            newVolumes.set(s.channelNumber, s.volume)
+            if (s.isMuted) newMuted.add(s.channelNumber)
+          })
+          
+          // Update refs immediately (before state update triggers re-render)
+          volumesRef.current = newVolumes
+          mutedChannelsRef.current = newMuted
+          
+          // Also apply to any already-loaded gain nodes immediately
+          gainNodesRef.current.forEach((gainNode, channelNum) => {
+            const volume = newVolumes.get(channelNum) ?? 1
+            const isMuted = newMuted.has(channelNum)
+            gainNode.gain.setValueAtTime(isMuted ? 0 : volume, gainNode.context.currentTime)
+          })
+          
+          setVolumes(newVolumes)
+          setMutedChannels(newMuted)
+        }
+      } catch (err) {
+        console.error('Failed to load channel settings:', err)
+      }
+    }
+
+    loadAnnotations()
+    loadChannelSettings()
+  }, [sessionId, channels])
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -872,6 +975,11 @@ function MultiChannelPlayer({
       audioRefs.current.clear()
       sourceNodesRef.current.clear()
       gainNodesRef.current.clear()
+      
+      // Clear any pending save timeout
+      if (settingsSaveTimeoutRef.current) {
+        clearTimeout(settingsSaveTimeoutRef.current)
+      }
     }
   }, [])
 
@@ -905,14 +1013,15 @@ function MultiChannelPlayer({
   }, [loadedChannels])
 
   // Apply volume changes via Web Audio API gain nodes
+  // Also re-apply when channels finish loading (gain nodes are created then)
   useEffect(() => {
     gainNodesRef.current.forEach((gainNode, channelNum) => {
       const volume = volumes.get(channelNum) ?? 1
       const isMuted = mutedChannels.has(channelNum)
-      // Use gain node for volume - allows values > 1 for boost
-      gainNode.gain.value = isMuted ? 0 : volume
+      const newValue = isMuted ? 0 : volume
+      gainNode.gain.setValueAtTime(newValue, gainNode.context.currentTime)
     })
-  }, [volumes, mutedChannels])
+  }, [volumes, mutedChannels, loadedChannels])
 
   // Periodic sync to correct any drift during playback
   useEffect(() => {
@@ -1042,21 +1151,45 @@ function MultiChannelPlayer({
     }, 100)
   }
 
+  // Save channel setting to server (debounced)
+  const saveChannelSetting = (channelNumber: number, volume: number, isMuted: boolean) => {
+    // Debounce saves to avoid too many requests while dragging volume slider
+    if (settingsSaveTimeoutRef.current) {
+      clearTimeout(settingsSaveTimeoutRef.current)
+    }
+    settingsSaveTimeoutRef.current = setTimeout(async () => {
+      try {
+        await fetch(`${API_BASE}/api/sessions/${sessionId}/channel-settings/${channelNumber}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ volume, isMuted }),
+        })
+      } catch (err) {
+        console.error('Failed to save channel setting:', err)
+      }
+    }, 500)
+  }
+
   // Volume change handler
   const handleVolumeChange = (channelNumber: number, volume: number) => {
     setVolumes(prev => new Map(prev).set(channelNumber, volume))
     // If changing volume while muted, unmute
-    if (mutedChannels.has(channelNumber) && volume > 0) {
+    const wasMuted = mutedChannels.has(channelNumber)
+    if (wasMuted && volume > 0) {
       setMutedChannels(prev => {
         const next = new Set(prev)
         next.delete(channelNumber)
         return next
       })
+      saveChannelSetting(channelNumber, volume, false)
+    } else {
+      saveChannelSetting(channelNumber, volume, wasMuted)
     }
   }
 
   // Mute toggle handler
   const handleMuteToggle = (channelNumber: number) => {
+    const willBeMuted = !mutedChannels.has(channelNumber)
     setMutedChannels(prev => {
       const next = new Set(prev)
       if (next.has(channelNumber)) {
@@ -1066,6 +1199,50 @@ function MultiChannelPlayer({
       }
       return next
     })
+    const currentVolume = volumes.get(channelNumber) ?? 1
+    saveChannelSetting(channelNumber, currentVolume, willBeMuted)
+  }
+
+  // Create annotation at current time
+  const handleAddAnnotation = async () => {
+    if (!newAnnotationLabel.trim()) return
+    
+    setIsAddingAnnotation(true)
+    try {
+      const response = await fetch(`${API_BASE}/api/sessions/${sessionId}/annotations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          timeSeconds: currentTime,
+          label: newAnnotationLabel.trim(),
+        }),
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        setUserAnnotations(prev => [...prev, data.annotation].sort((a, b) => a.timeSeconds - b.timeSeconds))
+        setNewAnnotationLabel('')
+      }
+    } catch (err) {
+      console.error('Failed to create annotation:', err)
+    } finally {
+      setIsAddingAnnotation(false)
+    }
+  }
+
+  // Delete annotation
+  const handleDeleteAnnotation = async (annotationId: number) => {
+    try {
+      const response = await fetch(`${API_BASE}/api/sessions/${sessionId}/annotations/${annotationId}`, {
+        method: 'DELETE',
+      })
+      
+      if (response.ok) {
+        setUserAnnotations(prev => prev.filter(a => a.id !== annotationId))
+      }
+    } catch (err) {
+      console.error('Failed to delete annotation:', err)
+    }
   }
 
   // Waveform click-to-seek handler
@@ -1187,48 +1364,112 @@ function MultiChannelPlayer({
             </span>
           )}
         </div>
+
+        {/* Add annotation controls */}
+        <div className="flex items-center gap-2 mt-3 pt-3 border-t border-slate-700">
+          <input
+            type="text"
+            value={newAnnotationLabel}
+            onChange={(e) => setNewAnnotationLabel(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleAddAnnotation()}
+            placeholder="Annotation label..."
+            className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500"
+          />
+          <Button
+            onClick={handleAddAnnotation}
+            disabled={!newAnnotationLabel.trim() || isAddingAnnotation}
+            size="sm"
+            className="bg-emerald-600 hover:bg-emerald-700"
+          >
+            {isAddingAnnotation ? (
+              <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+            ) : (
+              <>
+                <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                Add Marker at {formatTime(currentTime)}
+              </>
+            )}
+          </Button>
+        </div>
       </div>
 
-      {/* Timeline with clock time markers */}
-      {duration > 0 && (
-        <TimelineMarkers
-          markers={generateClockTimeMarkers(new Date(sessionCreatedAt), duration)}
-          duration={duration}
-          currentTime={currentTime}
-          onSeek={handleWaveformSeek}
-        />
-      )}
+      {/* Timeline with clock time markers and user annotations */}
+      {duration > 0 && (() => {
+        // Combine clock markers and user annotations
+        const clockMarkers = generateClockTimeMarkers(new Date(sessionCreatedAt), duration)
+        const userMarkers: TimeMarker[] = userAnnotations.map(a => ({
+          id: `user-${a.id}`,
+          time: a.timeSeconds,
+          label: a.label,
+          type: 'user' as const,
+          color: a.color || '#10b981', // emerald for user annotations
+        }))
+        const allMarkers = [...clockMarkers, ...userMarkers].sort((a, b) => a.time - b.time)
+        
+        return (
+          <TimelineMarkers
+            markers={allMarkers}
+            duration={duration}
+            currentTime={currentTime}
+            onSeek={handleWaveformSeek}
+            onDeleteMarker={(markerId) => {
+              // Extract annotation ID from marker ID (format: "user-123")
+              const match = markerId.match(/^user-(\d+)$/)
+              if (match) {
+                handleDeleteAnnotation(parseInt(match[1], 10))
+              }
+            }}
+          />
+        )
+      })()}
 
       {/* Channel Strips with overlaid time markers */}
       <div className="relative">
         {/* Vertical marker lines that extend through all channels */}
-        {duration > 0 && (
-          <div className="absolute inset-0 pointer-events-none z-10 flex items-stretch gap-2 px-2">
-            {/* Spacer for channel number */}
-            <span className="w-5 shrink-0" />
-            {/* Spacer for audio controls */}
-            <span className="w-[30px] shrink-0" />
-            {/* Markers container - matches waveform area */}
-            <div className="flex-1 min-w-0 relative">
-              {generateClockTimeMarkers(new Date(sessionCreatedAt), duration).map((marker) => {
-                const position = (marker.time / duration) * 100
-                if (position < 0 || position > 100) return null
-                return (
-                  <div
-                    key={`line-${marker.id}`}
-                    className="absolute top-0 bottom-0 w-px opacity-30"
-                    style={{ 
-                      left: `${position}%`,
-                      backgroundColor: marker.color || '#64748b',
-                    }}
-                  />
-                )
-              })}
+        {duration > 0 && (() => {
+          const clockMarkers = generateClockTimeMarkers(new Date(sessionCreatedAt), duration)
+          const userMarkers: TimeMarker[] = userAnnotations.map(a => ({
+            id: `user-${a.id}`,
+            time: a.timeSeconds,
+            label: a.label,
+            type: 'user' as const,
+            color: a.color || '#10b981',
+          }))
+          const allMarkers = [...clockMarkers, ...userMarkers]
+          
+          return (
+            <div className="absolute inset-0 pointer-events-none z-10 flex items-stretch gap-2 px-2">
+              {/* Spacer for channel number */}
+              <span className="w-5 shrink-0" />
+              {/* Spacer for audio controls */}
+              <span className="w-[30px] shrink-0" />
+              {/* Markers container - matches waveform area */}
+              <div className="flex-1 min-w-0 relative">
+                {allMarkers.map((marker) => {
+                  const position = (marker.time / duration) * 100
+                  if (position < 0 || position > 100) return null
+                  return (
+                    <div
+                      key={`line-${marker.id}`}
+                      className={`absolute top-0 bottom-0 ${marker.type === 'user' ? 'w-0.5 opacity-60' : 'w-px opacity-30'}`}
+                      style={{ 
+                        left: `${position}%`,
+                        backgroundColor: marker.color || '#64748b',
+                      }}
+                    />
+                  )
+                })}
+              </div>
+              {/* Spacer for options menu */}
+              <span className="w-[30px] shrink-0" />
             </div>
-            {/* Spacer for options menu */}
-            <span className="w-[30px] shrink-0" />
-          </div>
-        )}
+          )
+        })()}
 
         {/* Channel Strips */}
         <div className="flex flex-col gap-1 relative">

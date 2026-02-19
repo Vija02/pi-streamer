@@ -19,3 +19,5 @@ export * from "./segments";
 export * from "./channels";
 export * from "./pipelineRuns";
 export * from "./recordings";
+export * from "./annotations";
+export * from "./channelSettings";

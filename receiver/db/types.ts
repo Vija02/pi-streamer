@@ -126,6 +126,34 @@ export interface RecordingMetadata {
 }
 
 // =============================================================================
+// ANNOTATIONS (time markers on recordings)
+// =============================================================================
+
+export interface Annotation {
+  id: number;
+  session_id: string;
+  time_seconds: number;
+  label: string;
+  color: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// =============================================================================
+// CHANNEL SETTINGS (volume, mute state per session)
+// =============================================================================
+
+export interface ChannelSetting {
+  id: number;
+  session_id: string;
+  channel_number: number;
+  volume: number;
+  is_muted: number; // 0 = false, 1 = true (SQLite boolean)
+  created_at: string;
+  updated_at: string;
+}
+
+// =============================================================================
 // QUERY RESULT HELPERS
 // =============================================================================
 

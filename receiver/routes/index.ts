@@ -15,6 +15,8 @@ import mediaRoutes from "./mediaRoutes";
 import healthRoutes from "./healthRoutes";
 import uploadRoutes from "./uploadRoutes";
 import adminRoutes from "./adminRoutes";
+import annotationRoutes from "./annotationRoutes";
+import channelSettingsRoutes from "./channelSettingsRoutes";
 import { retryFailedUploads } from "../services/uploadQueue";
 
 const app = new Hono();
@@ -65,6 +67,12 @@ app.route("/api/upload", uploadRoutes);
 
 // Admin endpoints
 app.route("/api/admin", adminRoutes);
+
+// Annotation endpoints (nested under /api)
+app.route("/api", annotationRoutes);
+
+// Channel settings endpoints (nested under /api)
+app.route("/api", channelSettingsRoutes);
 
 // Legacy sessions endpoint (for backward compatibility)
 app.get("/sessions", async (c) => {
@@ -121,6 +129,13 @@ app.get("*", async (c) => {
           "GET /api/sessions/:id/channels": "Get channel URLs",
           "GET /api/sessions/:id/recording": "Get recording metadata",
           "PATCH /api/sessions/:id/recording": "Update recording metadata",
+          "GET /api/sessions/:id/annotations": "Get session annotations",
+          "POST /api/sessions/:id/annotations": "Create annotation",
+          "PATCH /api/sessions/:id/annotations/:id": "Update annotation",
+          "DELETE /api/sessions/:id/annotations/:id": "Delete annotation",
+          "GET /api/sessions/:id/channel-settings": "Get channel settings",
+          "PATCH /api/sessions/:id/channel-settings/:num": "Update channel setting",
+          "PUT /api/sessions/:id/channel-settings": "Bulk update settings",
           "GET /api/sessions/:id/channels/:num/audio": "Stream MP3 file",
           "GET /api/sessions/:id/channels/:num/peaks": "Get peaks JSON",
           "GET /api/sessions/:id/channels/:num/hls/:file": "Stream HLS",

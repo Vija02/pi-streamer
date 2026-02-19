@@ -166,6 +166,35 @@ function createTables(db: Database): void {
       FOREIGN KEY (session_id) REFERENCES sessions(id)
     )
   `);
+
+  // Annotations table (time markers on recordings)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS annotations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      time_seconds REAL NOT NULL,
+      label TEXT NOT NULL,
+      color TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (session_id) REFERENCES sessions(id)
+    )
+  `);
+
+  // Channel settings table (volume, mute state per session)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS channel_settings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      channel_number INTEGER NOT NULL,
+      volume REAL NOT NULL DEFAULT 1.0,
+      is_muted INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (session_id) REFERENCES sessions(id),
+      UNIQUE(session_id, channel_number)
+    )
+  `);
 }
 
 // =============================================================================
@@ -219,4 +248,10 @@ function createIndexes(db: Database): void {
 
   // Recording indexes
   db.run(`CREATE INDEX IF NOT EXISTS idx_recordings_session ON recordings(session_id)`);
+
+  // Annotation indexes
+  db.run(`CREATE INDEX IF NOT EXISTS idx_annotations_session ON annotations(session_id)`);
+
+  // Channel settings indexes
+  db.run(`CREATE INDEX IF NOT EXISTS idx_channel_settings_session ON channel_settings(session_id)`);
 }
