@@ -683,12 +683,14 @@ function TimelineMarkers({
   currentTime,
   onSeek,
   onDeleteMarker,
+  onSeekAndPlay,
 }: {
   markers: TimeMarker[]
   duration: number
   currentTime: number
   onSeek: (time: number) => void
   onDeleteMarker?: (markerId: string) => void
+  onSeekAndPlay?: (time: number) => void
 }) {
   if (duration <= 0 || markers.length === 0) return null
   
@@ -723,7 +725,14 @@ function TimelineMarkers({
               key={marker.id}
               className="absolute top-0 bottom-0 flex flex-col items-center cursor-pointer group"
               style={{ left: `${position}%` }}
-              onClick={() => onSeek(marker.time)}
+              onClick={() => {
+                // User markers seek AND play, clock markers just seek
+                if (isUserMarker && onSeekAndPlay) {
+                  onSeekAndPlay(marker.time)
+                } else {
+                  onSeek(marker.time)
+                }
+              }}
               title={`Jump to ${marker.label}${isUserMarker ? ' (right-click to delete)' : ''}`}
               onContextMenu={(e) => {
                 if (isUserMarker && onDeleteMarker) {
@@ -764,6 +773,11 @@ function TimelineMarkers({
   )
 }
 
+// Ref type for MultiChannelPlayer
+export interface MultiChannelPlayerRef {
+  seekAndPlay: (time: number) => void
+}
+
 // Multi-channel player with synchronized playback via Web Audio API
 function MultiChannelPlayer({
   channels,
@@ -773,6 +787,7 @@ function MultiChannelPlayer({
   regeneratingPeaksChannels,
   onRegenerateChannelMp3,
   onRegenerateChannelPeaks,
+  playerRef,
 }: {
   channels: Channel[]
   sessionId: string
@@ -781,6 +796,7 @@ function MultiChannelPlayer({
   regeneratingPeaksChannels: Set<number>
   onRegenerateChannelMp3: (channelNumber: number) => void
   onRegenerateChannelPeaks: (channelNumber: number) => void
+  playerRef?: React.MutableRefObject<MultiChannelPlayerRef | null>
 }) {
   // Refs for each channel's audio and wavesurfer
   const audioRefs = useRef<Map<number, HTMLAudioElement>>(new Map())
@@ -1070,6 +1086,40 @@ function MultiChannelPlayer({
     })
   }, [volumes, mutedChannels, loadedChannels])
 
+  // Expose seekAndPlay function via ref
+  useEffect(() => {
+    if (playerRef) {
+      playerRef.current = {
+        seekAndPlay: async (time: number) => {
+          // Seek to time
+          isSeeking.current = true
+          syncAllToTime(time)
+          wavesurferRefs.current.forEach(ws => {
+            const progress = time / ws.getDuration()
+            ws.seekTo(Math.min(1, Math.max(0, progress)))
+          })
+          setCurrentTime(time)
+          masterTimeRef.current = time
+          setTimeout(() => {
+            isSeeking.current = false
+          }, 100)
+          
+          // Then play
+          const audios = Array.from(audioRefs.current.values())
+          if (audios.length === 0) return
+          
+          if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+            await audioContextRef.current.resume()
+          }
+          
+          const playPromises = audios.map(audio => audio.play().catch(() => {}))
+          await Promise.all(playPromises)
+          setIsPlaying(true)
+        }
+      }
+    }
+  }, [playerRef, loadedChannels])
+
   // Periodic sync to correct any drift during playback
   useEffect(() => {
     if (!isPlaying || loadedChannels.size < 2) return
@@ -1337,6 +1387,24 @@ function MultiChannelPlayer({
     }, 100)
   }
 
+  // Seek and start playback (for user marker clicks)
+  const handleSeekAndPlay = async (time: number) => {
+    // First seek
+    handleWaveformSeek(time)
+    
+    // Then play
+    const audios = Array.from(audioRefs.current.values())
+    if (audios.length === 0) return
+    
+    if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+      await audioContextRef.current.resume()
+    }
+    
+    const playPromises = audios.map(audio => audio.play().catch(() => {}))
+    await Promise.all(playPromises)
+    setIsPlaying(true)
+  }
+
   const allLoaded = loadedChannels.size === channels.length
 
   return (
@@ -1534,6 +1602,7 @@ function MultiChannelPlayer({
             duration={duration}
             currentTime={currentTime}
             onSeek={handleWaveformSeek}
+            onSeekAndPlay={handleSeekAndPlay}
             onDeleteMarker={(markerId) => {
               // Extract annotation ID from marker ID (format: "user-123")
               const match = markerId.match(/^user-(\d+)$/)
@@ -1611,6 +1680,7 @@ function MultiChannelPlayer({
           ))}
         </div>
       </div>
+
     </div>
   )
 }
@@ -1648,6 +1718,27 @@ function SessionDetail({
 }) {
   const [showSilentChannels, setShowSilentChannels] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [showChaptersPanel, setShowChaptersPanel] = useState(false)
+  const [chapters, setChapters] = useState<ApiAnnotation[]>([])
+  const playerRef = useRef<MultiChannelPlayerRef | null>(null)
+
+  // Fetch chapters/annotations
+  useEffect(() => {
+    const fetchChapters = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/sessions/${session.id}/annotations`)
+        if (response.ok) {
+          const data = await response.json()
+          setChapters(data.annotations || [])
+        }
+      } catch (err) {
+        console.error('Failed to fetch chapters:', err)
+      }
+    }
+    if (session.status === 'processed') {
+      fetchChapters()
+    }
+  }, [session.id, session.status])
   
   // Filter channels - hide silent channels unless showSilentChannels is true
   const visibleChannels = channels.filter(c => showSilentChannels || !c.isSilent)
@@ -1734,11 +1825,28 @@ function SessionDetail({
         <div>
           <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
             <h3 className="text-lg font-semibold">Audio Channels</h3>
-            <SimpleDropdown
-              align="end"
-              disabled={isAnyRegenerating}
-              trigger={
-                <Button variant="outline" disabled={isAnyRegenerating}>
+            <div className="flex items-center gap-2">
+              {/* Chapters button */}
+              <Button
+                onClick={() => setShowChaptersPanel(!showChaptersPanel)}
+                variant={showChaptersPanel ? "default" : "outline"}
+                className={showChaptersPanel ? "bg-blue-600 hover:bg-blue-700" : ""}
+              >
+                <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                </svg>
+                Chapters
+                {chapters.length > 0 && (
+                  <span className="ml-1 bg-slate-600 text-xs px-1.5 py-0.5 rounded-full">
+                    {chapters.length}
+                  </span>
+                )}
+              </Button>
+              <SimpleDropdown
+                align="end"
+                disabled={isAnyRegenerating}
+                trigger={
+                  <Button variant="outline" disabled={isAnyRegenerating}>
                   {isAnyRegenerating ? (
                     <>
                       <svg className="animate-spin h-4 w-4 mr-2" viewBox="0 0 24 24">
@@ -1789,6 +1897,7 @@ function SessionDetail({
                 Delete Session
               </SimpleDropdownItem>
             </SimpleDropdown>
+            </div>
           </div>
           <MultiChannelPlayer
             channels={visibleChannels}
@@ -1798,6 +1907,7 @@ function SessionDetail({
             regeneratingPeaksChannels={regeneratingPeaksChannels}
             onRegenerateChannelMp3={onRegenerateChannelMp3}
             onRegenerateChannelPeaks={onRegenerateChannelPeaks}
+            playerRef={playerRef}
           />
           
           {/* Toggle for silent channels */}
@@ -1839,6 +1949,80 @@ function SessionDetail({
         isLoading={isDeleting}
         variant="danger"
       />
+
+      {/* Chapters Panel (slides in from right) */}
+      {showChaptersPanel && (
+        <div className="fixed right-0 top-0 h-full w-80 bg-slate-800 border-l border-slate-700 shadow-xl z-50 flex flex-col">
+          <div className="flex items-center justify-between p-4 border-b border-slate-700">
+            <h3 className="font-semibold">Chapters</h3>
+            <button
+              onClick={() => setShowChaptersPanel(false)}
+              className="text-slate-400 hover:text-slate-200"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          
+          <div className="flex-1 overflow-y-auto p-4">
+            {chapters.length === 0 ? (
+              <p className="text-slate-500 text-sm text-center py-8">
+                No chapters yet. Add markers to create chapters.
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {chapters
+                  .sort((a, b) => a.timeSeconds - b.timeSeconds)
+                  .map((chapter, index, arr) => {
+                    // Calculate chapter duration (time until next chapter or end)
+                    const nextChapter = arr[index + 1]
+                    const totalDuration = session.totalDurationSeconds || 0
+                    const chapterEnd = nextChapter ? nextChapter.timeSeconds : totalDuration
+                    const chapterDuration = chapterEnd - chapter.timeSeconds
+                    
+                    return (
+                      <li
+                        key={chapter.id}
+                        className="bg-slate-900 rounded-lg p-3 cursor-pointer hover:bg-slate-700 transition-colors"
+                        onClick={() => {
+                          playerRef.current?.seekAndPlay(chapter.timeSeconds)
+                          setShowChaptersPanel(false)
+                        }}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <span className="font-medium text-sm block truncate">
+                              {chapter.label}
+                            </span>
+                            <span className="text-xs text-slate-400">
+                              {formatDuration(chapter.timeSeconds)}
+                            </span>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <span className="text-xs text-slate-500 block">
+                              Duration
+                            </span>
+                            <span className="text-xs text-slate-400">
+                              {formatDuration(chapterDuration)}
+                            </span>
+                          </div>
+                        </div>
+                      </li>
+                    )
+                  })}
+              </ul>
+            )}
+          </div>
+          
+          {/* Summary footer */}
+          {chapters.length > 0 && (
+            <div className="p-4 border-t border-slate-700 text-xs text-slate-400">
+              {chapters.length} chapter{chapters.length !== 1 ? 's' : ''} | Total: {formatDuration(session.totalDurationSeconds)}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
