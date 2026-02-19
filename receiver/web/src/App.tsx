@@ -381,77 +381,109 @@ function ChannelStrip({
   }
 
   return (
-    <div className="bg-slate-800 rounded-lg flex items-center gap-3 p-2 relative">
-      {/* Channel number and info */}
-      <div className="flex items-center gap-2">
-        <span className="font-semibold text-sm w-6 text-center">{channel.channelNumber}</span>
-        {channel.isQuiet && (
-          <span className="bg-slate-600 text-slate-300 px-1.5 py-0.5 rounded text-[10px] font-medium">
-            Q
-          </span>
-        )}
-      </div>
+    <div className="bg-slate-800 rounded-lg flex items-center gap-2 p-2 relative">
+      {/* Channel number */}
+      <span className="font-semibold text-sm w-5 text-center shrink-0">{channel.channelNumber}</span>
+      
+      {/* Quiet indicator */}
+      {channel.isQuiet && (
+        <span className="bg-slate-600 text-slate-300 px-1 py-0.5 rounded text-[10px] font-medium shrink-0">
+          Q
+        </span>
+      )}
 
-      {/* Mute button */}
-      <button
-        onClick={onMuteToggle}
-        className={`p-1.5 rounded transition-colors ${
-          isMuted 
-            ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30' 
-            : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-        }`}
-        title={isMuted ? 'Unmute' : 'Mute'}
-      >
-        {isMuted ? (
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
-          </svg>
-        ) : (
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-          </svg>
-        )}
-      </button>
-
-      {/* Volume slider - allows boost up to 200% */}
-      <div className="flex items-center gap-2 min-w-[120px]">
-        <input
-          type="range"
-          min="0"
-          max="2"
-          step="0.01"
-          value={isMuted ? 0 : volume}
-          onChange={(e) => onVolumeChange(parseFloat(e.target.value))}
-          className={`w-full h-1.5 rounded-lg appearance-none cursor-pointer ${
-            volume > 1 ? 'accent-amber-500' : 'accent-emerald-500'
-          }`}
-          style={{
-            background: `linear-gradient(to right, ${volume > 1 ? '#f59e0b' : '#10b981'} 0%, ${volume > 1 ? '#f59e0b' : '#10b981'} ${(isMuted ? 0 : volume) / 2 * 100}%, #334155 ${(isMuted ? 0 : volume) / 2 * 100}%, #334155 100%)`
-          }}
-          title={`Volume: ${Math.round(volume * 100)}%`}
-        />
-        {isEditingVolume ? (
-          <input
-            ref={inputRef}
-            type="number"
-            value={editValue}
-            onChange={(e) => setEditValue(e.target.value)}
-            onBlur={handleVolumeSubmit}
-            onKeyDown={handleKeyDown}
-            className="w-14 text-xs text-right bg-slate-900 border border-slate-600 rounded px-1 py-0.5 focus:outline-none focus:border-emerald-500"
-            min="0"
-          />
-        ) : (
-          <span 
-            className={`text-xs w-10 text-right cursor-pointer hover:underline ${volume > 1 ? 'text-amber-400' : 'text-slate-400'}`}
-            onDoubleClick={handleDoubleClick}
-            title="Double-click to enter custom value"
+      {/* Audio controls dropdown */}
+      <SimpleDropdown
+        align="start"
+        trigger={
+          <button 
+            className={`p-1.5 rounded transition-colors shrink-0 ${
+              isMuted 
+                ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30' 
+                : volume > 1
+                  ? 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30'
+                  : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+            }`}
+            title={isMuted ? 'Muted' : `Volume: ${Math.round(volume * 100)}%`}
           >
-            {Math.round(volume * 100)}%
-          </span>
-        )}
-      </div>
+            {isMuted ? (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+              </svg>
+            )}
+          </button>
+        }
+      >
+        <div className="px-3 py-2 min-w-[200px]" onClick={(e) => e.stopPropagation()}>
+          {/* Mute toggle */}
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-sm text-slate-300">Mute</span>
+            <button
+              onClick={onMuteToggle}
+              className={`w-10 h-5 rounded-full transition-colors relative ${
+                isMuted ? 'bg-red-500' : 'bg-slate-600'
+              }`}
+            >
+              <span 
+                className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-transform ${
+                  isMuted ? 'left-5' : 'left-0.5'
+                }`}
+              />
+            </button>
+          </div>
+          
+          {/* Volume slider */}
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-slate-300">Volume</span>
+              {isEditingVolume ? (
+                <input
+                  ref={inputRef}
+                  type="number"
+                  value={editValue}
+                  onChange={(e) => setEditValue(e.target.value)}
+                  onBlur={handleVolumeSubmit}
+                  onKeyDown={handleKeyDown}
+                  className="w-16 text-xs text-right bg-slate-900 border border-slate-600 rounded px-1 py-0.5 focus:outline-none focus:border-emerald-500"
+                  min="0"
+                />
+              ) : (
+                <span 
+                  className={`text-xs cursor-pointer hover:underline ${volume > 1 ? 'text-amber-400' : 'text-slate-400'}`}
+                  onDoubleClick={handleDoubleClick}
+                  title="Double-click to enter custom value"
+                >
+                  {Math.round(volume * 100)}%
+                </span>
+              )}
+            </div>
+            <input
+              type="range"
+              min="0"
+              max={Math.max(2, volume)}
+              step="0.01"
+              value={isMuted ? 0 : volume}
+              onChange={(e) => onVolumeChange(parseFloat(e.target.value))}
+              className={`w-full h-2 rounded-lg appearance-none cursor-pointer ${
+                volume > 1 ? 'accent-amber-500' : 'accent-emerald-500'
+              }`}
+              style={{
+                background: `linear-gradient(to right, ${volume > 1 ? '#f59e0b' : '#10b981'} 0%, ${volume > 1 ? '#f59e0b' : '#10b981'} ${(isMuted ? 0 : volume) / Math.max(2, volume) * 100}%, #334155 ${(isMuted ? 0 : volume) / Math.max(2, volume) * 100}%, #334155 100%)`
+              }}
+            />
+            <div className="flex justify-between text-[10px] text-slate-500">
+              <span>0%</span>
+              <span>100%</span>
+              <span>{Math.round(Math.max(2, volume) * 100)}%</span>
+            </div>
+          </div>
+        </div>
+      </SimpleDropdown>
 
       {/* Waveform - clickable to seek */}
       <div className="flex-1 min-w-0">
@@ -475,7 +507,7 @@ function ChannelStrip({
       <SimpleDropdown
         align="end"
         trigger={
-          <button className="p-1.5 rounded bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors">
+          <button className="p-1.5 rounded bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors shrink-0">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
             </svg>
