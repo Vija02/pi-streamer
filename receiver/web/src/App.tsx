@@ -642,6 +642,40 @@ function generateClockTimeMarkers(sessionStartTime: Date, durationSeconds: numbe
   return markers
 }
 
+// Calculate row assignments for markers to avoid label overlap
+function assignMarkerRows(markers: TimeMarker[], duration: number): Map<string, number> {
+  const rowAssignments = new Map<string, number>()
+  const LABEL_WIDTH_PER_CHAR = 6 // approximate pixels per character
+  const LABEL_PADDING = 16 // extra padding for label
+  
+  // Sort markers by time
+  const sortedMarkers = [...markers].sort((a, b) => a.time - b.time)
+  
+  // Track end positions for each row (as percentage)
+  const rowEndPositions: number[] = []
+  
+  for (const marker of sortedMarkers) {
+    const position = (marker.time / duration) * 100
+    const labelWidth = (marker.label.length * LABEL_WIDTH_PER_CHAR + LABEL_PADDING) / 10 // rough percentage
+    
+    // Find first row where this label fits (doesn't overlap)
+    let assignedRow = 0
+    for (let row = 0; row < rowEndPositions.length; row++) {
+      if (position >= rowEndPositions[row]) {
+        assignedRow = row
+        break
+      }
+      assignedRow = row + 1
+    }
+    
+    // Update the end position for this row
+    rowEndPositions[assignedRow] = position + labelWidth
+    rowAssignments.set(marker.id, assignedRow)
+  }
+  
+  return rowAssignments
+}
+
 // Timeline component showing time markers - mimics ChannelStrip layout for alignment
 function TimelineMarkers({
   markers,
@@ -658,8 +692,13 @@ function TimelineMarkers({
 }) {
   if (duration <= 0 || markers.length === 0) return null
   
+  // Calculate row assignments to avoid overlap
+  const rowAssignments = assignMarkerRows(markers, duration)
+  const maxRow = Math.max(0, ...Array.from(rowAssignments.values()))
+  const timelineHeight = Math.max(24, (maxRow + 1) * 16 + 8) // minimum 24px, 16px per row + padding
+  
   return (
-    <div className="flex items-center gap-2 px-2 mb-1">
+    <div className="flex items-start gap-2 px-2 mb-1">
       {/* Spacer for channel number */}
       <span className="w-5 shrink-0" />
       
@@ -667,13 +706,17 @@ function TimelineMarkers({
       <span className="w-[30px] shrink-0" />
       
       {/* Timeline area - matches waveform flex-1 */}
-      <div className="flex-1 min-w-0 relative h-6 bg-slate-900/50 rounded">
+      <div 
+        className="flex-1 min-w-0 relative bg-slate-900/50 rounded"
+        style={{ height: `${timelineHeight}px` }}
+      >
         {/* Markers */}
         {markers.map((marker) => {
           const position = (marker.time / duration) * 100
           if (position < 0 || position > 100) return null
           
           const isUserMarker = marker.type === 'user'
+          const row = rowAssignments.get(marker.id) || 0
           
           return (
             <div
@@ -696,8 +739,11 @@ function TimelineMarkers({
               />
               {/* Label */}
               <span 
-                className={`absolute text-[10px] font-medium whitespace-nowrap transform -translate-x-1/2 group-hover:scale-110 transition-transform ${isUserMarker ? 'top-1 bg-slate-800/90 px-1 rounded' : 'top-0.5'}`}
-                style={{ color: marker.color || '#64748b' }}
+                className={`absolute text-[10px] font-medium whitespace-nowrap transform -translate-x-1/2 group-hover:scale-110 transition-transform ${isUserMarker ? 'bg-slate-800/90 px-1 rounded' : ''}`}
+                style={{ 
+                  color: marker.color || '#64748b',
+                  top: `${row * 16 + 2}px`
+                }}
               >
                 {marker.label}
               </span>
