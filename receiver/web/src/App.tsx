@@ -572,10 +572,130 @@ function ChannelStrip({
   )
 }
 
+// Types for time markers/annotations
+interface TimeMarker {
+  id: string
+  time: number // seconds from start
+  label: string
+  type: 'clock' | 'user' // clock = auto-generated from clock time, user = user-added
+  color?: string
+}
+
+// Generate clock time markers for round times (every 30 minutes)
+function generateClockTimeMarkers(sessionStartTime: Date, durationSeconds: number): TimeMarker[] {
+  const markers: TimeMarker[] = []
+  const startMs = sessionStartTime.getTime()
+  
+  // Find the first 30-minute mark after (or at) the start
+  const startMinutes = sessionStartTime.getMinutes()
+  const startSeconds = sessionStartTime.getSeconds()
+  
+  // Calculate minutes until next 30-min mark (0 or 30)
+  let minutesToNext: number
+  if (startMinutes < 30) {
+    minutesToNext = 30 - startMinutes
+  } else {
+    minutesToNext = 60 - startMinutes
+  }
+  // Subtract any seconds we're into the current minute
+  const secondsToNext = minutesToNext * 60 - startSeconds
+  
+  // If we start exactly on a 30-min mark, start from 0
+  const firstMarkerOffset = (startMinutes % 30 === 0 && startSeconds === 0) ? 0 : secondsToNext
+  
+  // Generate markers every 30 minutes
+  for (let offsetSeconds = firstMarkerOffset; offsetSeconds < durationSeconds; offsetSeconds += 30 * 60) {
+    const markerTime = new Date(startMs + offsetSeconds * 1000)
+    let hours = markerTime.getHours()
+    const minutes = markerTime.getMinutes()
+    const ampm = hours >= 12 ? 'pm' : 'am'
+    hours = hours % 12 || 12
+    
+    const label = `${hours}:${minutes.toString().padStart(2, '0')}${ampm}`
+    
+    markers.push({
+      id: `clock-${offsetSeconds}`,
+      time: offsetSeconds,
+      label,
+      type: 'clock',
+      color: '#64748b', // All markers in slate gray
+    })
+  }
+  
+  return markers
+}
+
+// Timeline component showing time markers - mimics ChannelStrip layout for alignment
+function TimelineMarkers({
+  markers,
+  duration,
+  currentTime,
+  onSeek,
+}: {
+  markers: TimeMarker[]
+  duration: number
+  currentTime: number
+  onSeek: (time: number) => void
+}) {
+  if (duration <= 0 || markers.length === 0) return null
+  
+  return (
+    <div className="flex items-center gap-2 px-2 mb-1">
+      {/* Spacer for channel number */}
+      <span className="w-5 shrink-0" />
+      
+      {/* Spacer for audio controls button (matches the button width) */}
+      <span className="w-[30px] shrink-0" />
+      
+      {/* Timeline area - matches waveform flex-1 */}
+      <div className="flex-1 min-w-0 relative h-5 bg-slate-900/50 rounded">
+        {/* Markers */}
+        {markers.map((marker) => {
+          const position = (marker.time / duration) * 100
+          if (position < 0 || position > 100) return null
+          
+          return (
+            <div
+              key={marker.id}
+              className="absolute top-0 bottom-0 flex flex-col items-center cursor-pointer group"
+              style={{ left: `${position}%` }}
+              onClick={() => onSeek(marker.time)}
+              title={`Jump to ${marker.label}`}
+            >
+              {/* Vertical line */}
+              <div 
+                className="w-px h-full group-hover:w-0.5 transition-all"
+                style={{ backgroundColor: marker.color || '#64748b' }}
+              />
+              {/* Label */}
+              <span 
+                className="absolute top-0.5 text-[10px] font-medium whitespace-nowrap transform -translate-x-1/2 group-hover:scale-110 transition-transform"
+                style={{ color: marker.color || '#64748b' }}
+              >
+                {marker.label}
+              </span>
+            </div>
+          )
+        })}
+        
+        {/* Current time indicator */}
+        <div
+          className="absolute top-0 bottom-0 w-0.5 bg-emerald-500 pointer-events-none z-10"
+          style={{ left: `${(currentTime / duration) * 100}%` }}
+        />
+      </div>
+      
+      {/* Spacer for options menu button */}
+      <span className="w-[30px] shrink-0" />
+    </div>
+  )
+}
+
 // Multi-channel player with synchronized playback via Web Audio API
 function MultiChannelPlayer({
   channels,
   sessionId,
+  sessionCreatedAt,
   regeneratingChannels,
   regeneratingPeaksChannels,
   onRegenerateChannelMp3,
@@ -583,6 +703,7 @@ function MultiChannelPlayer({
 }: {
   channels: Channel[]
   sessionId: string
+  sessionCreatedAt: string
   regeneratingChannels: Set<number>
   regeneratingPeaksChannels: Set<number>
   onRegenerateChannelMp3: (channelNumber: number) => void
@@ -1068,27 +1189,69 @@ function MultiChannelPlayer({
         </div>
       </div>
 
-      {/* Channel Strips */}
-      <div className="flex flex-col gap-1">
-        {channels.map((channel) => (
-          <ChannelStrip
-            key={channel.channelNumber}
-            channel={channel}
-            volume={volumes.get(channel.channelNumber) ?? 1}
-            isMuted={mutedChannels.has(channel.channelNumber)}
-            onVolumeChange={(vol) => handleVolumeChange(channel.channelNumber, vol)}
-            onMuteToggle={() => handleMuteToggle(channel.channelNumber)}
-            isRegenerating={regeneratingChannels.has(channel.channelNumber)}
-            isRegeneratingPeaks={regeneratingPeaksChannels.has(channel.channelNumber)}
-            onRegenerate={() => onRegenerateChannelMp3(channel.channelNumber)}
-            onRegeneratePeaks={() => onRegenerateChannelPeaks(channel.channelNumber)}
-            waveformRef={handleWaveformRef(channel.channelNumber, channel)}
-            isLoaded={loadedChannels.has(channel.channelNumber)}
-            error={channelErrors.get(channel.channelNumber) || null}
-            onSeek={handleWaveformSeek}
-            duration={duration}
-          />
-        ))}
+      {/* Timeline with clock time markers */}
+      {duration > 0 && (
+        <TimelineMarkers
+          markers={generateClockTimeMarkers(new Date(sessionCreatedAt), duration)}
+          duration={duration}
+          currentTime={currentTime}
+          onSeek={handleWaveformSeek}
+        />
+      )}
+
+      {/* Channel Strips with overlaid time markers */}
+      <div className="relative">
+        {/* Vertical marker lines that extend through all channels */}
+        {duration > 0 && (
+          <div className="absolute inset-0 pointer-events-none z-10 flex items-stretch gap-2 px-2">
+            {/* Spacer for channel number */}
+            <span className="w-5 shrink-0" />
+            {/* Spacer for audio controls */}
+            <span className="w-[30px] shrink-0" />
+            {/* Markers container - matches waveform area */}
+            <div className="flex-1 min-w-0 relative">
+              {generateClockTimeMarkers(new Date(sessionCreatedAt), duration).map((marker) => {
+                const position = (marker.time / duration) * 100
+                if (position < 0 || position > 100) return null
+                return (
+                  <div
+                    key={`line-${marker.id}`}
+                    className="absolute top-0 bottom-0 w-px opacity-30"
+                    style={{ 
+                      left: `${position}%`,
+                      backgroundColor: marker.color || '#64748b',
+                    }}
+                  />
+                )
+              })}
+            </div>
+            {/* Spacer for options menu */}
+            <span className="w-[30px] shrink-0" />
+          </div>
+        )}
+
+        {/* Channel Strips */}
+        <div className="flex flex-col gap-1 relative">
+          {channels.map((channel) => (
+            <ChannelStrip
+              key={channel.channelNumber}
+              channel={channel}
+              volume={volumes.get(channel.channelNumber) ?? 1}
+              isMuted={mutedChannels.has(channel.channelNumber)}
+              onVolumeChange={(vol) => handleVolumeChange(channel.channelNumber, vol)}
+              onMuteToggle={() => handleMuteToggle(channel.channelNumber)}
+              isRegenerating={regeneratingChannels.has(channel.channelNumber)}
+              isRegeneratingPeaks={regeneratingPeaksChannels.has(channel.channelNumber)}
+              onRegenerate={() => onRegenerateChannelMp3(channel.channelNumber)}
+              onRegeneratePeaks={() => onRegenerateChannelPeaks(channel.channelNumber)}
+              waveformRef={handleWaveformRef(channel.channelNumber, channel)}
+              isLoaded={loadedChannels.has(channel.channelNumber)}
+              error={channelErrors.get(channel.channelNumber) || null}
+              onSeek={handleWaveformSeek}
+              duration={duration}
+            />
+          ))}
+        </div>
       </div>
     </div>
   )
@@ -1272,6 +1435,7 @@ function SessionDetail({
           <MultiChannelPlayer
             channels={visibleChannels}
             sessionId={session.id}
+            sessionCreatedAt={session.created_at}
             regeneratingChannels={regeneratingChannels}
             regeneratingPeaksChannels={regeneratingPeaksChannels}
             onRegenerateChannelMp3={onRegenerateChannelMp3}
