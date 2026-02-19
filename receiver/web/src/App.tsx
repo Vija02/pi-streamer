@@ -1751,7 +1751,9 @@ function SessionDetail({
   
   const isAnyRegenerating = isRegeneratingHlsPeaks || isRegeneratingAllMp3s || regeneratingChannels.size > 0 || regeneratingPeaksChannels.size > 0
   return (
-    <div className="w-full">
+    <div className="w-full flex h-[calc(100vh-4rem)] -my-4 sm:-my-6">
+      {/* Main content */}
+      <div className="flex-1 min-w-0 overflow-y-auto py-4 sm:py-6 pr-4 sm:pr-6">
       {/* Back button for mobile */}
       <Link
         href="/"
@@ -1949,29 +1951,30 @@ function SessionDetail({
         isLoading={isDeleting}
         variant="danger"
       />
+      </div>
 
-      {/* Chapters Panel (slides in from right) */}
+      {/* Chapters Panel (side panel that takes space) */}
       {showChaptersPanel && (
-        <div className="fixed right-0 top-0 h-full w-80 bg-slate-800 border-l border-slate-700 shadow-xl z-50 flex flex-col">
-          <div className="flex items-center justify-between p-4 border-b border-slate-700">
-            <h3 className="font-semibold">Chapters</h3>
+        <div className="w-56 shrink-0 border-l border-slate-700 flex flex-col h-full -mr-4 sm:-mr-6">
+          <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700">
+            <h3 className="font-semibold text-sm">Chapters</h3>
             <button
               onClick={() => setShowChaptersPanel(false)}
               className="text-slate-400 hover:text-slate-200"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           </div>
           
-          <div className="flex-1 overflow-y-auto p-4">
+          <div className="flex-1 overflow-y-auto">
             {chapters.length === 0 ? (
-              <p className="text-slate-500 text-sm text-center py-8">
+              <p className="text-slate-500 text-sm text-center py-8 px-3">
                 No chapters yet. Add markers to create chapters.
               </p>
             ) : (
-              <ul className="space-y-2">
+              <ul>
                 {chapters
                   .sort((a, b) => a.timeSeconds - b.timeSeconds)
                   .map((chapter, index, arr) => {
@@ -1984,29 +1987,18 @@ function SessionDetail({
                     return (
                       <li
                         key={chapter.id}
-                        className="bg-slate-900 rounded-lg p-3 cursor-pointer hover:bg-slate-700 transition-colors"
+                        className="px-3 py-2 cursor-pointer hover:bg-slate-700/50 transition-colors border-b border-slate-700/50"
                         onClick={() => {
                           playerRef.current?.seekAndPlay(chapter.timeSeconds)
-                          setShowChaptersPanel(false)
                         }}
                       >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex-1 min-w-0">
-                            <span className="font-medium text-sm block truncate">
-                              {chapter.label}
-                            </span>
-                            <span className="text-xs text-slate-400">
-                              {formatDuration(chapter.timeSeconds)}
-                            </span>
-                          </div>
-                          <div className="text-right shrink-0">
-                            <span className="text-xs text-slate-500 block">
-                              Duration
-                            </span>
-                            <span className="text-xs text-slate-400">
-                              {formatDuration(chapterDuration)}
-                            </span>
-                          </div>
+                        <span className="font-medium text-sm block truncate">
+                          {chapter.label}
+                        </span>
+                        <div className="flex items-center gap-2 text-xs text-slate-400">
+                          <span>{formatDuration(chapter.timeSeconds)}</span>
+                          <span className="text-slate-600">|</span>
+                          <span>{formatDuration(chapterDuration)}</span>
                         </div>
                       </li>
                     )
@@ -2017,8 +2009,8 @@ function SessionDetail({
           
           {/* Summary footer */}
           {chapters.length > 0 && (
-            <div className="p-4 border-t border-slate-700 text-xs text-slate-400">
-              {chapters.length} chapter{chapters.length !== 1 ? 's' : ''} | Total: {formatDuration(session.totalDurationSeconds)}
+            <div className="px-3 py-2 border-t border-slate-700 text-xs text-slate-400">
+              {chapters.length} chapter{chapters.length !== 1 ? 's' : ''}
             </div>
           )}
         </div>
