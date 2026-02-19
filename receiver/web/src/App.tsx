@@ -1410,10 +1410,11 @@ function MultiChannelPlayer({
   return (
     <div className="flex flex-col gap-4">
       {/* Master Transport Controls */}
-      <div className="bg-slate-800 rounded-lg p-4">
-        <div className="flex items-center gap-4">
+      <div className="bg-slate-800 rounded-lg p-3 sm:p-4">
+        {/* Top row: Play controls, seek bar, marker button */}
+        <div className="flex items-center gap-2 sm:gap-4">
           {/* Play/Stop buttons */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 sm:gap-2">
             <Button
               onClick={handlePlayPause}
               disabled={!allLoaded}
@@ -1442,8 +1443,8 @@ function MultiChannelPlayer({
             </Button>
           </div>
 
-          {/* Skip buttons */}
-          <div className="flex items-center gap-1">
+          {/* Skip buttons - hidden on very small screens */}
+          <div className="hidden xs:flex items-center gap-1">
             <Button
               onClick={() => handleSkip(-10)}
               disabled={!allLoaded}
@@ -1468,13 +1469,13 @@ function MultiChannelPlayer({
             </Button>
           </div>
 
-          {/* Time display */}
-          <span className="text-sm font-mono text-slate-300 min-w-[80px]">
+          {/* Time display - compact on mobile */}
+          <span className="text-xs sm:text-sm font-mono text-slate-300 min-w-[60px] sm:min-w-[80px]">
             {formatTime(currentTime)}
           </span>
 
           {/* Seek bar */}
-          <div className="flex-1">
+          <div className="flex-1 min-w-0">
             <input
               type="range"
               min="0"
@@ -1487,19 +1488,19 @@ function MultiChannelPlayer({
             />
           </div>
 
-          {/* Duration */}
-          <span className="text-sm font-mono text-slate-300 min-w-[80px] text-right">
+          {/* Duration - hidden on small screens */}
+          <span className="hidden sm:block text-sm font-mono text-slate-300 min-w-[80px] text-right">
             {formatTime(duration)}
           </span>
 
           {/* Loading indicator */}
           {!allLoaded && (
-            <span className="text-xs text-slate-400 flex items-center gap-2">
+            <span className="text-xs text-slate-400 flex items-center gap-1 sm:gap-2">
               <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
               </svg>
-              Loading {loadedChannels.size}/{channels.length}
+              <span className="hidden sm:inline">Loading</span> {loadedChannels.size}/{channels.length}
             </span>
           )}
 
@@ -1511,16 +1512,16 @@ function MultiChannelPlayer({
             className={isAnnotationPanelOpen ? "bg-emerald-600 hover:bg-emerald-700" : ""}
             title="Add annotation marker"
           >
-            <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4 sm:mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
             </svg>
-            Marker
+            <span className="hidden sm:inline">Marker</span>
           </Button>
         </div>
 
         {/* Annotation panel (collapsible) */}
         {isAnnotationPanelOpen && (
-          <div className="flex items-center gap-2 mt-3 pt-3 border-t border-slate-700">
+          <div className="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-slate-700">
             {/* Annotation input */}
             <input
               type="text"
@@ -1528,7 +1529,7 @@ function MultiChannelPlayer({
               onChange={(e) => setNewAnnotationLabel(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleAddAnnotation()}
               placeholder="Annotation label..."
-              className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500"
+              className="flex-1 min-w-[150px] bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500"
               autoFocus
             />
 
@@ -1554,8 +1555,8 @@ function MultiChannelPlayer({
               </Button>
             </div>
 
-            {/* Current time display */}
-            <span className="text-sm font-mono text-slate-400 px-2">
+            {/* Current time display - hidden on mobile since it's in main bar */}
+            <span className="hidden sm:block text-sm font-mono text-slate-400 px-2">
               {formatTime(currentTime)}
             </span>
 
@@ -1953,16 +1954,16 @@ function SessionDetail({
       />
       </div>
 
-      {/* Chapters Panel (side panel that takes space) */}
+      {/* Chapters Panel - overlay on mobile, side panel on larger screens */}
       {showChaptersPanel && (
-        <div className="w-56 shrink-0 border-l border-slate-700 flex flex-col h-full -mr-4 sm:-mr-6">
-          <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700">
-            <h3 className="font-semibold text-sm">Chapters</h3>
+        <div className="fixed inset-0 z-50 bg-slate-900 flex flex-col md:static md:inset-auto md:z-auto md:bg-transparent md:w-56 md:shrink-0 md:border-l md:border-slate-700 md:h-full md:-mr-4 lg:-mr-6">
+          <div className="flex items-center justify-between px-4 py-3 md:px-3 md:py-2 border-b border-slate-700">
+            <h3 className="font-semibold text-base md:text-sm">Chapters</h3>
             <button
               onClick={() => setShowChaptersPanel(false)}
-              className="text-slate-400 hover:text-slate-200"
+              className="text-slate-400 hover:text-slate-200 p-1 md:p-0"
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-5 h-5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
@@ -1996,20 +1997,24 @@ function SessionDetail({
                     return (
                       <li
                         key={chapter.id}
-                        className="px-3 py-2 cursor-pointer hover:bg-slate-700/50 transition-colors border-b border-slate-700/50"
+                        className="px-4 py-3 md:px-3 md:py-2 cursor-pointer hover:bg-slate-700/50 active:bg-slate-700 transition-colors border-b border-slate-700/50"
                         onClick={() => {
                           playerRef.current?.seekAndPlay(chapter.timeSeconds)
+                          // Close panel on mobile after selecting
+                          if (window.innerWidth < 768) {
+                            setShowChaptersPanel(false)
+                          }
                         }}
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <span className="font-medium text-sm truncate">
+                          <span className="font-medium text-base md:text-sm truncate">
                             {chapter.label}
                           </span>
-                          <span className="text-xs text-slate-400 shrink-0">
+                          <span className="text-sm md:text-xs text-slate-400 shrink-0">
                             {clockTime}
                           </span>
                         </div>
-                        <div className="text-xs text-slate-500">
+                        <div className="text-sm md:text-xs text-slate-500">
                           Duration: {formatDuration(chapterDuration)}
                         </div>
                       </li>
