@@ -787,6 +787,7 @@ function MultiChannelPlayer({
   regeneratingPeaksChannels,
   onRegenerateChannelMp3,
   onRegenerateChannelPeaks,
+  onAnnotationsChange,
   playerRef,
 }: {
   channels: Channel[]
@@ -796,6 +797,7 @@ function MultiChannelPlayer({
   regeneratingPeaksChannels: Set<number>
   onRegenerateChannelMp3: (channelNumber: number) => void
   onRegenerateChannelPeaks: (channelNumber: number) => void
+  onAnnotationsChange?: () => void
   playerRef?: React.MutableRefObject<MultiChannelPlayerRef | null>
 }) {
   // Refs for each channel's audio and wavesurfer
@@ -1343,6 +1345,7 @@ function MultiChannelPlayer({
         const data = await response.json()
         setUserAnnotations(prev => [...prev, data.annotation].sort((a, b) => a.timeSeconds - b.timeSeconds))
         setNewAnnotationLabel('')
+        onAnnotationsChange?.()
       }
     } catch (err) {
       console.error('Failed to create annotation:', err)
@@ -1360,6 +1363,7 @@ function MultiChannelPlayer({
       
       if (response.ok) {
         setUserAnnotations(prev => prev.filter(a => a.id !== annotationId))
+        onAnnotationsChange?.()
       }
     } catch (err) {
       console.error('Failed to delete annotation:', err)
@@ -1443,8 +1447,8 @@ function MultiChannelPlayer({
             </Button>
           </div>
 
-          {/* Skip buttons - hidden on very small screens */}
-          <div className="hidden xs:flex items-center gap-1">
+          {/* Skip buttons */}
+          <div className="flex items-center gap-1">
             <Button
               onClick={() => handleSkip(-10)}
               disabled={!allLoaded}
@@ -1724,18 +1728,19 @@ function SessionDetail({
   const playerRef = useRef<MultiChannelPlayerRef | null>(null)
 
   // Fetch chapters/annotations
-  useEffect(() => {
-    const fetchChapters = async () => {
-      try {
-        const response = await fetch(`${API_BASE}/api/sessions/${session.id}/annotations`)
-        if (response.ok) {
-          const data = await response.json()
-          setChapters(data.annotations || [])
-        }
-      } catch (err) {
-        console.error('Failed to fetch chapters:', err)
+  const fetchChapters = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/sessions/${session.id}/annotations`)
+      if (response.ok) {
+        const data = await response.json()
+        setChapters(data.annotations || [])
       }
+    } catch (err) {
+      console.error('Failed to fetch chapters:', err)
     }
+  }
+  
+  useEffect(() => {
     if (session.status === 'processed') {
       fetchChapters()
     }
@@ -1910,6 +1915,7 @@ function SessionDetail({
             regeneratingPeaksChannels={regeneratingPeaksChannels}
             onRegenerateChannelMp3={onRegenerateChannelMp3}
             onRegenerateChannelPeaks={onRegenerateChannelPeaks}
+            onAnnotationsChange={fetchChapters}
             playerRef={playerRef}
           />
           
