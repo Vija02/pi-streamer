@@ -6,7 +6,8 @@
 import { createLogger } from "../utils/logger";
 import { getSession, updateSessionStatus } from "../db/sessions";
 import { getSessionSegments } from "../db/segments";
-import { processChannel, cleanupTempFiles, cleanupChannelTempFiles } from "./channelProcessor";
+import { processChannel, cleanupTempFiles, cleanupChannelTempFiles, cleanupSessionFiles } from "./channelProcessor";
+import { config } from "../config";
 import type { PipelineOptions, SessionProcessorResult } from "./types";
 
 const logger = createLogger("SessionProcessor");
@@ -136,6 +137,12 @@ export async function processSession(
       `Session ${sessionId} processed successfully in ${totalDurationMs}ms ` +
         `(${successfulChannels} channels)`
     );
+
+    // Clean up local files if S3 is enabled and deleteLocalAfterUpload is true
+    if (config.s3.enabled && config.processing.deleteLocalAfterUpload) {
+      logger.info(`Cleaning up local files for session ${sessionId} (uploaded to S3)`);
+      await cleanupSessionFiles(sessionId);
+    }
   } else if (successfulChannels > 0) {
     // Partial success - some channels processed
     updateSessionStatus(sessionId, "processed");
@@ -143,6 +150,7 @@ export async function processSession(
       `Session ${sessionId} partially processed in ${totalDurationMs}ms ` +
         `(${successfulChannels} succeeded, ${failedChannels} failed)`
     );
+    // Don't clean up on partial success - some files may need reprocessing
   } else {
     // All channels failed
     updateSessionStatus(sessionId, "failed");

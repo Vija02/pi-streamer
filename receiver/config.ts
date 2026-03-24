@@ -69,6 +69,8 @@ export const config = {
       bits: Number(process.env.PEAKS_BITS) || 8,
     },
     keepFlacAfterProcess: process.env.KEEP_FLAC_AFTER_PROCESS !== "false",
+    // Delete local files after successful S3 upload (only when S3 is enabled)
+    deleteLocalAfterUpload: process.env.DELETE_LOCAL_AFTER_UPLOAD === "true",
   },
 
   // Session management

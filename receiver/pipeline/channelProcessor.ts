@@ -294,3 +294,18 @@ export async function cleanupTempFiles(sessionId: string): Promise<void> {
     logger.warn(`Failed to clean up temp directory ${tempDir}: ${error}`);
   }
 }
+
+/**
+ * Clean up entire session directory (all local files)
+ * Call this after all files have been uploaded to S3
+ */
+export async function cleanupSessionFiles(sessionId: string): Promise<void> {
+  const { getSessionDir } = await import("../utils/paths");
+  const sessionDir = getSessionDir(sessionId);
+  try {
+    await rm(sessionDir, { recursive: true, force: true });
+    logger.info(`Cleaned up session directory: ${sessionDir}`);
+  } catch (error) {
+    logger.warn(`Failed to clean up session directory ${sessionDir}: ${error}`);
+  }
+}
