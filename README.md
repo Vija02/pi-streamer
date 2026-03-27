@@ -467,6 +467,24 @@ curl -X POST http://localhost:3000/session/process \
 2. Verify bucket exists and you have write access
 3. Check S3_ENDPOINT for non-AWS services
 
+## Utility Scripts
+
+### Upload Session to S3
+
+If S3 uploads failed during processing, you can manually upload all files for a session:
+
+```bash
+cd receiver
+bun run upload-session <sessionId>
+```
+
+This will upload all MP3, peaks, and HLS files for the session and update the database with the new S3 URLs.
+
+Example:
+```bash
+bun run upload-session 20260327120000
+```
+
 ## Web UI
 
 The receiver includes a built-in web interface for:
