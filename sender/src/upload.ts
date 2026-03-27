@@ -9,6 +9,7 @@ import { uploadLogger as logger } from "./logger";
 export interface UploadQueueItem {
   filePath: string;
   segmentNumber: number;
+  sessionId: string;
   retries: number;
 }
 
@@ -86,7 +87,7 @@ async function uploadFile(
  */
 async function saveFailedUpload(item: UploadQueueItem): Promise<void> {
   const config = getConfig();
-  const failedDir = join(config.recordingDir, config.sessionId, ".failed");
+  const failedDir = join(config.recordingDir, item.sessionId, ".failed");
   await $`mkdir -p ${failedDir}`;
 
   const infoPath = join(failedDir, `seg_${item.segmentNumber}.json`);
@@ -96,7 +97,7 @@ async function saveFailedUpload(item: UploadQueueItem): Promise<void> {
       {
         filePath: item.filePath,
         segmentNumber: item.segmentNumber,
-        sessionId: config.sessionId,
+        sessionId: item.sessionId,
         timestamp: new Date().toISOString(),
       },
       null,
@@ -120,7 +121,7 @@ async function processUploadQueue(): Promise<void> {
     const item = uploadQueue.shift();
     if (!item) continue;
 
-    const success = await uploadFile(item.filePath, item.segmentNumber, config.sessionId);
+    const success = await uploadFile(item.filePath, item.segmentNumber, item.sessionId);
 
     if (!success) {
       item.retries++;
@@ -150,8 +151,8 @@ async function processUploadQueue(): Promise<void> {
 /**
  * Add a file to the upload queue
  */
-export function queueUpload(filePath: string, segmentNumber: number): void {
-  uploadQueue.push({ filePath, segmentNumber, retries: 0 });
+export function queueUpload(filePath: string, segmentNumber: number, sessionId: string): void {
+  uploadQueue.push({ filePath, segmentNumber, sessionId, retries: 0 });
 
   if (!uploadQueueRunning) {
     processUploadQueue();

@@ -205,6 +205,8 @@ docker run -d \
 | `FINISH_TRIGGER_PATH`   | `/tmp/xr18-finish`             | Touch this file to stop recording gracefully |
 | `LOG_LEVEL`             | `info`                         | Logging level: trace, debug, info, warn, error |
 | `NODE_ENV`              | -                              | Set to "production" for JSON logging         |
+| `SCHEDULE_ENABLED`      | `false`                        | Enable scheduled recording mode              |
+| `SCHEDULE_PATH`         | `./schedule.json`              | Path to schedule JSON file                   |
 
 ### Receiver Environment Variables
 
@@ -386,6 +388,69 @@ AWS_SECRET_ACCESS_KEY=<R2_SECRET_ACCESS_KEY>
 S3_BUCKET=your-bucket-name
 AWS_REGION=auto
 ```
+
+## Scheduled Recording
+
+The sender supports scheduled recording mode, which automatically starts and stops recordings based on a schedule file. This is useful for recurring recording sessions or unattended operation.
+
+### Schedule File Format
+
+Create a `schedule.json` file:
+
+```json
+{
+  "slots": [
+    {
+      "start": "2024-02-07T09:00:00",
+      "end": "2024-02-07T10:30:00",
+      "name": "Morning Session"
+    },
+    {
+      "start": "2024-02-07T14:00:00",
+      "end": "2024-02-07T16:00:00",
+      "name": "Afternoon Session"
+    },
+    {
+      "start": "2024-02-07T19:00:00",
+      "end": "2024-02-07T21:30:00"
+    }
+  ]
+}
+```
+
+- `start` and `end` are ISO 8601 datetime strings
+- `name` is optional - used as part of the session ID
+- Each slot creates a separate recording session
+
+### Starting Scheduled Mode
+
+```bash
+cd sender
+
+# Using command
+bun run scheduled
+
+# Or using environment variable
+SCHEDULE_ENABLED=true bun run start
+
+# With custom schedule path
+SCHEDULE_PATH=./my-schedule.json bun run scheduled
+```
+
+### Hot-Reload
+
+The schedule file is watched for changes. When you modify the file, the scheduler automatically reloads it without restarting the service. This allows you to:
+
+- Add new time slots while the service is running
+- Modify upcoming slots
+- Remove slots (active recordings won't be affected)
+
+### Session IDs
+
+Each time slot creates a session with an auto-generated ID:
+
+- With name: `20240207_090000_Morning_Session`
+- Without name: `20240207_090000`
 
 ## Stopping Recording
 

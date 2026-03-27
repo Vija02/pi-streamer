@@ -41,6 +41,10 @@ export interface Config {
 
   // Finish trigger file path
   finishTriggerPath: string;
+
+  // Scheduler settings
+  scheduleEnabled: boolean;
+  schedulePath: string;
 }
 
 export function loadConfig(): Config {
@@ -82,6 +86,10 @@ export function loadConfig(): Config {
 
     // Finish trigger - touch this file to gracefully stop recording
     finishTriggerPath: process.env.FINISH_TRIGGER_PATH || "/tmp/xr18-finish",
+
+    // Scheduler settings
+    scheduleEnabled: process.env.SCHEDULE_ENABLED === "true",
+    schedulePath: process.env.SCHEDULE_PATH || "./schedule.json",
   };
 }
 

@@ -7,6 +7,7 @@
  * - Records locally as segments (primary - always works)
  * - Uploads completed segments to server in background
  * - Graceful shutdown via SIGINT, SIGTERM, or finish trigger file
+ * - Scheduled recording mode with hot-reloadable schedule file
  *
  * This design prioritizes data safety:
  * - Local recording happens first (never lost even if network fails)
@@ -28,6 +29,7 @@ import { commandExists } from "./utils";
 import { startRecording } from "./recorder";
 import { checkJackSetup, getCapturePorts } from "./jack";
 import { uploadPending } from "./upload";
+import { startScheduler, stopScheduler, getSchedulerState } from "./scheduler";
 
 /**
  * Check that all required dependencies are installed
@@ -75,10 +77,63 @@ async function testJack(): Promise<void> {
 }
 
 /**
+ * Run in scheduled recording mode
+ */
+async function runScheduled(): Promise<void> {
+  const config = getConfig();
+  
+  logger.info({ schedulePath: config.schedulePath }, "Starting in scheduled recording mode");
+
+  // Check dependencies
+  const missing = await checkDependencies();
+  if (missing.length > 0) {
+    logger.fatal({ missing }, "Missing dependencies. Install with: sudo apt install jack-capture jackd2 ffmpeg");
+    process.exit(1);
+  }
+
+  // Check JACK setup
+  const jackCheck = await checkJackSetup();
+  if (!jackCheck.ok) {
+    logger.fatal("JACK server is not running. Start JACK first.");
+    process.exit(1);
+  }
+
+  // Handle graceful shutdown
+  const shutdown = async () => {
+    logger.info("Shutdown signal received");
+    await stopScheduler();
+    process.exit(0);
+  };
+
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+
+  // Start the scheduler
+  await startScheduler(config.schedulePath);
+
+  // Keep the process alive
+  logger.info("Scheduler running. Press Ctrl+C to stop.");
+  
+  // Keep alive loop - check scheduler status periodically
+  while (true) {
+    await Bun.sleep(60000); // Check every minute
+    
+    const state = getSchedulerState();
+    logger.debug({ 
+      isRecording: state.isRecording,
+      hasSchedule: state.hasSchedule,
+      slotCount: state.slotCount,
+      nextSlot: state.nextSlot?.slot.start,
+    }, "Scheduler status");
+  }
+}
+
+/**
  * Main service entry point
  */
 async function main(): Promise<void> {
   const command = process.argv[2];
+  const config = getConfig();
 
   // Handle special commands
   if (command === "test") {
@@ -91,13 +146,19 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === "scheduled" || command === "schedule") {
+    await runScheduled();
+    return;
+  }
+
   if (command === "help" || command === "--help" || command === "-h") {
     console.log(`XR18 Audio Sender Service
 
 Usage: bun run src/index.ts [command]
 
 Commands:
-  (default)      - Start recording service
+  (default)      - Start recording service (immediate recording)
+  scheduled      - Start in scheduled recording mode (uses schedule.json)
   test           - Test JACK setup
   upload-pending - Retry uploading any failed segments
   help           - Show this help message
@@ -118,6 +179,21 @@ Environment variables:
   LOG_LEVEL             - Logging level: trace, debug, info, warn, error (default: info)
   NODE_ENV              - Set to "production" for JSON logging
 
+Scheduled recording settings:
+  SCHEDULE_ENABLED      - Enable scheduled recording mode (default: false)
+  SCHEDULE_PATH         - Path to schedule JSON file (default: ./schedule.json)
+
+Schedule file format (schedule.json):
+  {
+    "slots": [
+      { "start": "2024-02-07T09:00:00", "end": "2024-02-07T10:30:00", "name": "Morning Session" },
+      { "start": "2024-02-07T14:00:00", "end": "2024-02-07T16:00:00" }
+    ]
+  }
+
+The schedule file is watched for changes and will hot-reload when modified.
+Each time slot creates a separate recording session with its own session ID.
+
 JACK auto-start settings:
   JACK_AUTO_START       - Auto-start JACK if not running (default: true)
   JACK_DRIVER           - JACK driver (default: alsa)
@@ -137,7 +213,13 @@ Laptop audio routing (send laptop output to XR18 input):
     return;
   }
 
-  // Default: start recording service
+  // Check if scheduled mode is enabled via environment variable
+  if (config.scheduleEnabled) {
+    await runScheduled();
+    return;
+  }
+
+  // Default: start recording service (immediate recording)
   logger.info("XR18 Audio Sender Service starting...");
 
   // Check dependencies

@@ -21,6 +21,7 @@ import { getConfig } from "./config"
 
 interface WatcherState {
 	sessionDir: string
+	sessionId: string
 	watcher: FSWatcher | null
 	pollInterval: Timer | null
 	seenFiles: Set<string>
@@ -31,6 +32,7 @@ interface WatcherState {
 
 const state: WatcherState = {
 	sessionDir: "",
+	sessionId: "",
 	watcher: null,
 	pollInterval: null,
 	seenFiles: new Set(),
@@ -98,7 +100,7 @@ async function processFileForUpload(filename: string): Promise<void> {
 
 			// Queue each FLAC file for upload
 			for (const flacPath of compressed.flacFiles) {
-				queueUpload(flacPath, segmentNumber)
+				queueUpload(flacPath, segmentNumber, state.sessionId)
 			}
 
 			// Delete original WAV to save space
@@ -107,7 +109,7 @@ async function processFileForUpload(filename: string): Promise<void> {
 			}
 		} else {
 			// No compression - upload WAV directly
-			queueUpload(filePath, segmentNumber)
+			queueUpload(filePath, segmentNumber, state.sessionId)
 		}
 
 		state.queuedFiles.add(filename)
@@ -169,13 +171,14 @@ function handleFsEvent(eventType: string, filename: string | null): void {
 /**
  * Start watching a directory for new segment files
  */
-export function startWatcher(sessionDir: string): void {
+export function startWatcher(sessionDir: string, sessionId: string): void {
 	if (state.isRunning) {
 		logger.warn("Watcher already running")
 		return
 	}
 
 	state.sessionDir = sessionDir
+	state.sessionId = sessionId
 	state.seenFiles = new Set()
 	state.queuedFiles = new Set()
 	state.processingFiles = new Set()

@@ -25,3 +25,4 @@ export const uploadLogger = logger.child({ module: "upload" });
 export const recordingLogger = logger.child({ module: "recording" });
 export const watcherLogger = logger.child({ module: "watcher" });
 export const compressLogger = logger.child({ module: "compress" });
+export const schedulerLogger = logger.child({ module: "scheduler" });
