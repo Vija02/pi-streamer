@@ -2,8 +2,10 @@
  * Upload Peaks Step
  *
  * Uploads the peaks JSON to S3.
+ * Optionally deletes the local file after successful upload.
  */
 import { S3Client } from "bun";
+import { unlink } from "fs/promises";
 import { BaseStep } from "./base";
 import type { StepContext, PipelineData, StepResult } from "../types";
 import { getPeaksS3Key, buildS3Url } from "../../utils/paths";
@@ -83,6 +85,16 @@ export class UploadPeaksStep extends BaseStep {
       this.logger.info(
         `Uploaded peaks to ${s3Key} (${(fileData.byteLength / 1024).toFixed(1)} KB) in ${durationMs}ms`
       );
+
+      // Delete local file after successful upload if configured
+      if (config.processing.deleteAfterS3Upload && data.peaksPath) {
+        try {
+          await unlink(data.peaksPath);
+          this.logger.debug(`Deleted local peaks file: ${data.peaksPath}`);
+        } catch (err) {
+          this.logger.warn(`Failed to delete local peaks file: ${data.peaksPath}`, err);
+        }
+      }
 
       return this.success({ peaksS3Url }, { durationMs, bytesProcessed: fileData.byteLength });
     } catch (error) {

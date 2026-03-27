@@ -225,6 +225,8 @@ docker run -d \
 | `SESSION_TIMEOUT_MINUTES`  | `10`                  | Timeout before auto-processing session     |
 | `MP3_BITRATE`              | `320k`                | MP3 encoding bitrate                       |
 | `KEEP_FLAC_AFTER_PROCESS`  | `true`                | Keep FLAC files after MP3 created          |
+| `DELETE_AFTER_S3_UPLOAD`   | `false`               | Delete MP3/peaks/HLS files immediately after S3 upload |
+| `DELETE_LOCAL_AFTER_UPLOAD`| `false`               | Delete entire session directory after all uploads complete |
 | `UPLOAD_RETRY_INTERVAL`    | `5000`                | Retry delay in ms                          |
 | `UPLOAD_MAX_RETRIES`       | `5`                   | Max upload retry attempts                  |
 | `UPLOAD_CONCURRENCY`       | `2`                   | Concurrent S3 uploads                      |

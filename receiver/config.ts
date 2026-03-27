@@ -71,6 +71,9 @@ export const config = {
     keepFlacAfterProcess: process.env.KEEP_FLAC_AFTER_PROCESS !== "false",
     // Delete local files after successful S3 upload (only when S3 is enabled)
     deleteLocalAfterUpload: process.env.DELETE_LOCAL_AFTER_UPLOAD === "true",
+    // Delete individual files (MP3, peaks, HLS) immediately after uploading to S3
+    // More aggressive than deleteLocalAfterUpload - doesn't wait for entire session to complete
+    deleteAfterS3Upload: process.env.DELETE_AFTER_S3_UPLOAD === "true",
   },
 
   // Session management

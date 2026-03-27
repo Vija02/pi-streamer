@@ -2,8 +2,10 @@
  * Upload MP3 Step
  *
  * Uploads the encoded MP3 to S3.
+ * Optionally deletes the local file after successful upload.
  */
 import { S3Client } from "bun";
+import { unlink } from "fs/promises";
 import { BaseStep } from "./base";
 import type { StepContext, PipelineData, StepResult } from "../types";
 import { getMp3S3Key, buildS3Url } from "../../utils/paths";
@@ -77,6 +79,16 @@ export class UploadMp3Step extends BaseStep {
       this.logger.info(
         `Uploaded MP3 to ${mp3S3Key} (${(fileData.byteLength / 1024 / 1024).toFixed(2)} MB) in ${durationMs}ms`
       );
+
+      // Delete local file after successful upload if configured
+      if (config.processing.deleteAfterS3Upload && data.mp3Path) {
+        try {
+          await unlink(data.mp3Path);
+          this.logger.debug(`Deleted local MP3 file: ${data.mp3Path}`);
+        } catch (err) {
+          this.logger.warn(`Failed to delete local MP3 file: ${data.mp3Path}`, err);
+        }
+      }
 
       return this.success(
         { mp3S3Key, mp3S3Url },

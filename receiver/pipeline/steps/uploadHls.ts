@@ -2,8 +2,10 @@
  * Upload HLS Step
  *
  * Uploads HLS playlist and all segment files to S3.
+ * Optionally deletes local files after successful upload.
  */
 import { S3Client } from "bun";
+import { unlink } from "fs/promises";
 import { basename } from "path";
 import { BaseStep } from "./base";
 import type { StepContext, PipelineData, StepResult } from "../types";
@@ -128,6 +130,35 @@ export class UploadHlsStep extends BaseStep {
       this.logger.info(
         `Uploaded HLS to ${playlistS3Key} (${(totalBytes / 1024 / 1024).toFixed(2)} MB total) in ${durationMs}ms`
       );
+
+      // Delete local files after successful upload if configured
+      if (config.processing.deleteAfterS3Upload) {
+        let deletedCount = 0;
+
+        // Delete playlist
+        if (data.hlsPlaylistPath) {
+          try {
+            await unlink(data.hlsPlaylistPath);
+            deletedCount++;
+          } catch (err) {
+            this.logger.warn(`Failed to delete local HLS playlist: ${data.hlsPlaylistPath}`, err);
+          }
+        }
+
+        // Delete all segment files
+        if (data.hlsSegmentPaths && data.hlsSegmentPaths.length > 0) {
+          for (const segPath of data.hlsSegmentPaths) {
+            try {
+              await unlink(segPath);
+              deletedCount++;
+            } catch (err) {
+              // Silently ignore individual segment deletion failures
+            }
+          }
+        }
+
+        this.logger.debug(`Deleted ${deletedCount} local HLS files`);
+      }
 
       return this.success(
         { hlsS3Url },
