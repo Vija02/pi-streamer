@@ -207,6 +207,40 @@ async function uploadFolder(folderArg: string): Promise<void> {
     }
     process.exit(1);
   }
+
+  // Send finish signal to receiver
+  await notifySessionComplete(sessionId);
+}
+
+/**
+ * Notify the receiver that a session is complete
+ */
+async function notifySessionComplete(sessionId: string): Promise<void> {
+  const baseUrl = config.streamUrl.replace(/\/stream$/, "");
+  const completeUrl = `${baseUrl}/session/complete`;
+
+  console.log(`\nNotifying receiver of session completion...`);
+
+  try {
+    const response = await fetch(completeUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ sessionId }),
+    });
+
+    if (response.ok) {
+      const result = await response.json();
+      console.log(`Session marked as complete. Processing queued.`);
+    } else {
+      console.error(`Failed to notify receiver: HTTP ${response.status}`);
+    }
+  } catch (err) {
+    console.error(
+      `Could not notify receiver of session completion: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
 }
 
 // Main entry point
