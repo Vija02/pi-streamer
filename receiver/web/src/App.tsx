@@ -1114,6 +1114,9 @@ function MultiChannelPlayer({
             await audioContextRef.current.resume()
           }
           
+          // Wait for all audio elements to buffer enough data after seeking
+          await waitForAllAudiosReady(audios)
+          
           const playPromises = audios.map(audio => audio.play().catch(() => {}))
           await Promise.all(playPromises)
           setIsPlaying(true)
@@ -1178,6 +1181,41 @@ function MultiChannelPlayer({
     })
   }
 
+  // Wait for an audio element to have enough buffered data to play
+  const waitForAudioReady = (audio: HTMLAudioElement, timeout = 2000): Promise<void> => {
+    return new Promise((resolve) => {
+      // Check if already ready to play
+      if (audio.readyState >= 3) { // HAVE_FUTURE_DATA or HAVE_ENOUGH_DATA
+        resolve()
+        return
+      }
+
+      const timeoutId = setTimeout(() => {
+        cleanup()
+        resolve() // Resolve anyway after timeout to avoid blocking forever
+      }, timeout)
+
+      const onCanPlay = () => {
+        cleanup()
+        resolve()
+      }
+
+      const cleanup = () => {
+        clearTimeout(timeoutId)
+        audio.removeEventListener('canplay', onCanPlay)
+        audio.removeEventListener('canplaythrough', onCanPlay)
+      }
+
+      audio.addEventListener('canplay', onCanPlay)
+      audio.addEventListener('canplaythrough', onCanPlay)
+    })
+  }
+
+  // Wait for all audio elements to be ready after seeking
+  const waitForAllAudiosReady = async (audios: HTMLAudioElement[]): Promise<void> => {
+    await Promise.all(audios.map(audio => waitForAudioReady(audio)))
+  }
+
   // Play all channels simultaneously
   const playAll = async () => {
     const audios = Array.from(audioRefs.current.values())
@@ -1191,6 +1229,9 @@ function MultiChannelPlayer({
     // First, sync all to the same time
     const targetTime = masterTimeRef.current
     syncAllToTime(targetTime)
+
+    // Wait for all audio elements to buffer enough data after seeking
+    await waitForAllAudiosReady(audios)
 
     // Use Promise.all to start all audio elements as close together as possible
     const playPromises = audios.map(audio => {
@@ -1403,6 +1444,9 @@ function MultiChannelPlayer({
     if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
       await audioContextRef.current.resume()
     }
+    
+    // Wait for all audio elements to buffer enough data after seeking
+    await waitForAllAudiosReady(audios)
     
     const playPromises = audios.map(audio => audio.play().catch(() => {}))
     await Promise.all(playPromises)
