@@ -339,6 +339,7 @@ function ChannelStrip({
   error,
   onSeek,
   duration,
+  isAdmin,
 }: { 
   channel: Channel
   volume: number
@@ -357,6 +358,7 @@ function ChannelStrip({
   error: string | null
   onSeek: (time: number) => void
   duration: number
+  isAdmin: boolean
 }) {
   const [isEditingVolume, setIsEditingVolume] = useState(false)
   const [editValue, setEditValue] = useState('')
@@ -536,44 +538,50 @@ function ChannelStrip({
         />
       </div>
 
-      {/* Options menu */}
-      <SimpleDropdown
-        align="end"
-        trigger={
-          <button className="p-1.5 rounded bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors shrink-0">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
-            </svg>
-          </button>
-        }
-      >
-        {channel.url && (
-          <a href={channel.url} download className="flex items-center gap-2 cursor-pointer relative rounded-sm px-2 py-1.5 text-sm transition-colors hover:bg-slate-700">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-            Download MP3
-          </a>
-        )}
-        <SimpleDropdownItem 
-          onClick={onRegenerate}
-          disabled={isRegenerating}
+      {/* Options menu - only show if there's something to show */}
+      {(channel.url || isAdmin) && (
+        <SimpleDropdown
+          align="end"
+          trigger={
+            <button className="p-1.5 rounded bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors shrink-0">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
+              </svg>
+            </button>
+          }
         >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-          {isRegenerating ? 'Regenerating...' : 'Regenerate MP3'}
-        </SimpleDropdownItem>
-        <SimpleDropdownItem 
-          onClick={onRegeneratePeaks}
-          disabled={isRegeneratingPeaks}
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
-          </svg>
-          {isRegeneratingPeaks ? 'Regenerating...' : 'Regenerate Peaks'}
-        </SimpleDropdownItem>
-      </SimpleDropdown>
+          {channel.url && (
+            <a href={channel.url} download className="flex items-center gap-2 cursor-pointer relative rounded-sm px-2 py-1.5 text-sm transition-colors hover:bg-slate-700">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              Download MP3
+            </a>
+          )}
+          {isAdmin && (
+            <>
+              <SimpleDropdownItem 
+                onClick={onRegenerate}
+                disabled={isRegenerating}
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                {isRegenerating ? 'Regenerating...' : 'Regenerate MP3'}
+              </SimpleDropdownItem>
+              <SimpleDropdownItem 
+                onClick={onRegeneratePeaks}
+                disabled={isRegeneratingPeaks}
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                </svg>
+                {isRegeneratingPeaks ? 'Regenerating...' : 'Regenerate Peaks'}
+              </SimpleDropdownItem>
+            </>
+          )}
+        </SimpleDropdown>
+      )}
 
       {/* Regenerating overlay */}
       {(isRegenerating || isRegeneratingPeaks) && (
@@ -808,6 +816,7 @@ function MultiChannelPlayer({
   onRegenerateChannelPeaks,
   onAnnotationsChange,
   playerRef,
+  isAdmin,
 }: {
   channels: Channel[]
   sessionId: string
@@ -818,6 +827,7 @@ function MultiChannelPlayer({
   onRegenerateChannelPeaks: (channelNumber: number) => void
   onAnnotationsChange?: () => void
   playerRef?: React.MutableRefObject<MultiChannelPlayerRef | null>
+  isAdmin: boolean
 }) {
   // Refs for each channel's audio and wavesurfer
   const audioRefs = useRef<Map<number, HTMLAudioElement>>(new Map())
@@ -1772,6 +1782,7 @@ function MultiChannelPlayer({
                 error={channelErrors.get(channel.channelNumber) || null}
                 onSeek={handleWaveformSeek}
                 duration={duration}
+                isAdmin={isAdmin}
               />
             )
           })}
@@ -1797,6 +1808,7 @@ function SessionDetail({
   isDeleting,
   regeneratingChannels,
   regeneratingPeaksChannels,
+  isAdmin,
 }: {
   session: Session
   channels: Channel[]
@@ -1812,6 +1824,7 @@ function SessionDetail({
   isDeleting: boolean
   regeneratingChannels: Set<number>
   regeneratingPeaksChannels: Set<number>
+  isAdmin: boolean
 }) {
   const [showSilentChannels, setShowSilentChannels] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
@@ -1942,24 +1955,25 @@ function SessionDetail({
                   </span>
                 )}
               </Button>
-              <SimpleDropdown
-                align="end"
-                disabled={isAnyRegenerating}
-                trigger={
-                  <Button variant="outline" disabled={isAnyRegenerating}>
-                  {isAnyRegenerating ? (
-                    <>
-                      <svg className="animate-spin h-4 w-4 mr-2" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                      </svg>
-                      Processing...
-                    </>
-                  ) : (
-                    <>
-                      Actions
-                      <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              {isAdmin && (
+                <SimpleDropdown
+                  align="end"
+                  disabled={isAnyRegenerating}
+                  trigger={
+                    <Button variant="outline" disabled={isAnyRegenerating}>
+                    {isAnyRegenerating ? (
+                      <>
+                        <svg className="animate-spin h-4 w-4 mr-2" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                        Processing...
+                      </>
+                    ) : (
+                      <>
+                        Admin
+                        <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                       </svg>
                     </>
                   )}
@@ -1997,6 +2011,7 @@ function SessionDetail({
                 Delete Session
               </SimpleDropdownItem>
             </SimpleDropdown>
+              )}
             </div>
           </div>
           <MultiChannelPlayer
@@ -2009,6 +2024,7 @@ function SessionDetail({
             onRegenerateChannelPeaks={onRegenerateChannelPeaks}
             onAnnotationsChange={fetchChapters}
             playerRef={playerRef}
+            isAdmin={isAdmin}
           />
           
           {/* Toggle for silent channels */}
@@ -2137,9 +2153,11 @@ function SessionDetail({
 function SessionPage({
   sessions,
   fetchSessions,
+  isAdmin,
 }: {
   sessions: Session[]
   fetchSessions: () => void
+  isAdmin: boolean
 }) {
   const [, params] = useRoute('/session/:id')
   const sessionId = params?.id || null
@@ -2385,6 +2403,7 @@ function SessionPage({
       isDeleting={isDeleting}
       regeneratingChannels={regeneratingChannels}
       regeneratingPeaksChannels={regeneratingPeaksChannels}
+      isAdmin={isAdmin}
     />
   )
 }
@@ -2393,9 +2412,11 @@ function SessionPage({
 function SessionPageWrapper({
   sessions,
   fetchSessions,
+  isAdmin,
 }: {
   sessions: Session[]
   fetchSessions: () => void
+  isAdmin: boolean
 }) {
   const [, params] = useRoute('/session/:id')
   const sessionId = params?.id || null
@@ -2406,9 +2427,13 @@ function SessionPageWrapper({
       key={sessionId}
       sessions={sessions}
       fetchSessions={fetchSessions}
+      isAdmin={isAdmin}
     />
   )
 }
+
+const ADMIN_PASSWORD = 'admin'
+const ADMIN_STORAGE_KEY = 'pi-streamer-admin'
 
 function App() {
   const [sessions, setSessions] = useState<Session[]>([])
@@ -2417,6 +2442,36 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [, params] = useRoute('/session/:id')
   const selectedSessionId = params?.id || null
+  
+  // Admin state - check localStorage on init
+  // isAdminAuthenticated = has entered password correctly (persisted)
+  // isAdmin = currently showing admin features (toggleable without re-auth)
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(() => {
+    return localStorage.getItem(ADMIN_STORAGE_KEY) === 'true'
+  })
+  const [isAdmin, setIsAdmin] = useState(() => {
+    return localStorage.getItem(ADMIN_STORAGE_KEY) === 'true'
+  })
+
+  const handleAdminToggle = () => {
+    if (isAdmin) {
+      // Just hide admin features (don't require re-auth)
+      setIsAdmin(false)
+    } else if (isAdminAuthenticated) {
+      // Already authenticated, just show admin features
+      setIsAdmin(true)
+    } else {
+      // Prompt for password
+      const password = prompt('Enter admin password:')
+      if (password === ADMIN_PASSWORD) {
+        localStorage.setItem(ADMIN_STORAGE_KEY, 'true')
+        setIsAdminAuthenticated(true)
+        setIsAdmin(true)
+      } else if (password !== null) {
+        alert('Incorrect password')
+      }
+    }
+  }
 
   // Fetch sessions
   const fetchSessions = async () => {
@@ -2463,7 +2518,28 @@ function App() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
           </svg>
         </button>
-        <h1 className="text-lg sm:text-xl font-semibold text-slate-50">Hope Newcastle Recordings</h1>
+        <h1 className="text-lg sm:text-xl font-semibold text-slate-50 flex-1">Hope Newcastle Recordings</h1>
+        
+        {/* Admin lock toggle */}
+        <button
+          onClick={handleAdminToggle}
+          className={`p-2 rounded transition-colors ${
+            isAdmin 
+              ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30' 
+              : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+          }`}
+          title={isAdmin ? 'Admin mode (click to lock)' : 'Locked (click to unlock)'}
+        >
+          {isAdmin ? (
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+            </svg>
+          ) : (
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+          )}
+        </button>
       </header>
 
       {error && (
@@ -2504,7 +2580,7 @@ function App() {
         <div className="flex-1 overflow-y-auto p-4 sm:p-6">
           <Switch>
             <Route path="/session/:id">
-              <SessionPageWrapper sessions={sessions} fetchSessions={fetchSessions} />
+              <SessionPageWrapper sessions={sessions} fetchSessions={fetchSessions} isAdmin={isAdmin} />
             </Route>
             <Route path="/">
               <div className="flex items-center justify-center h-full text-slate-500 text-base">
