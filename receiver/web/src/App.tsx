@@ -2297,6 +2297,27 @@ function SessionPage({
   )
 }
 
+// Wrapper component to force remount SessionPage when navigating between sessions
+function SessionPageWrapper({
+  sessions,
+  fetchSessions,
+}: {
+  sessions: Session[]
+  fetchSessions: () => void
+}) {
+  const [, params] = useRoute('/session/:id')
+  const sessionId = params?.id || null
+  
+  // Key on sessionId forces complete remount when navigating between sessions
+  return (
+    <SessionPage
+      key={sessionId}
+      sessions={sessions}
+      fetchSessions={fetchSessions}
+    />
+  )
+}
+
 function App() {
   const [sessions, setSessions] = useState<Session[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -2391,7 +2412,7 @@ function App() {
         <div className="flex-1 overflow-y-auto p-4 sm:p-6">
           <Switch>
             <Route path="/session/:id">
-              <SessionPage sessions={sessions} fetchSessions={fetchSessions} />
+              <SessionPageWrapper sessions={sessions} fetchSessions={fetchSessions} />
             </Route>
             <Route path="/">
               <div className="flex items-center justify-center h-full text-slate-500 text-base">
