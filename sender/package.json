@@ -7,7 +7,8 @@
     "start": "bun run src/index.ts",
     "dev": "bun --watch run src/index.ts",
     "test-jack": "bun run src/index.ts test",
-    "upload-pending": "bun run src/index.ts upload-pending"
+    "upload-pending": "bun run src/index.ts upload-pending",
+    "upload-folder": "bun run scripts/upload-folder.ts"
   },
   "devDependencies": {
     "@types/bun": "^1.1.0",

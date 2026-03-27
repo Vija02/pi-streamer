@@ -469,20 +469,42 @@ curl -X POST http://localhost:3000/session/process \
 
 ## Utility Scripts
 
-### Upload Session to S3
+### Upload Recording Folder (Sender)
 
-If S3 uploads failed during processing, you can manually upload all files for a session:
+If uploads failed during recording, you can manually upload all FLAC files from a session folder to the receiver:
 
 ```bash
-cd receiver
-bun run upload-session <sessionId>
+cd sender
+bun run upload-folder <folder-path-or-session-id>
 ```
 
-This will upload all MP3, peaks, and HLS files for the session and update the database with the new S3 URLs.
+This will find all FLAC files in the recording folder and upload them to the receiver's `/stream` endpoint.
 
-Example:
+Examples:
 ```bash
-bun run upload-session 20260327120000
+# Using session ID (looks in RECORDING_DIR)
+bun run upload-folder 2024-02-07_12-30-00
+
+# Using relative path
+bun run upload-folder ./recordings/2024-02-07_12-30-00
+
+# Using absolute path
+bun run upload-folder /home/user/recordings/2024-02-07_12-30-00
+```
+
+Environment variables:
+- `STREAM_URL` - Receiver endpoint (default: `http://localhost:3000/stream`)
+- `RECORDING_DIR` - Base recordings directory (default: `./recordings`)
+- `SAMPLE_RATE` - Audio sample rate (default: 48000)
+- `CHANNELS` - Number of channels (default: 18)
+
+### Retry Failed Uploads (Sender)
+
+Retry any uploads that failed and were saved to `.failed/` directories:
+
+```bash
+cd sender
+bun run upload-pending
 ```
 
 ## Web UI

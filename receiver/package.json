@@ -8,8 +8,7 @@
     "start:node": "node --experimental-strip-types server.ts",
     "dev": "bun --watch run server.ts",
     "build:web": "cd web && bun run build",
-    "dev:web": "cd web && bun run dev",
-    "upload-session": "bun run scripts/upload-session.ts"
+    "dev:web": "cd web && bun run dev"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.990.0",
