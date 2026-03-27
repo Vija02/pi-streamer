@@ -325,8 +325,11 @@ function ChannelStrip({
   channel, 
   volume,
   isMuted,
+  isSoloed,
+  isEffectivelyMuted,
   onVolumeChange,
   onMuteToggle,
+  onSoloToggle,
   isRegenerating,
   isRegeneratingPeaks,
   onRegenerate,
@@ -340,8 +343,11 @@ function ChannelStrip({
   channel: Channel
   volume: number
   isMuted: boolean
+  isSoloed: boolean
+  isEffectivelyMuted: boolean // true if another channel is soloed and this one isn't
   onVolumeChange: (volume: number) => void
   onMuteToggle: () => void
+  onSoloToggle: () => void
   isRegenerating?: boolean
   isRegeneratingPeaks?: boolean
   onRegenerate?: () => void
@@ -385,7 +391,7 @@ function ChannelStrip({
   }
 
   return (
-    <div className="bg-slate-800 rounded-lg flex items-center gap-2 p-2 relative">
+    <div className={`bg-slate-800 rounded-lg flex items-center gap-2 p-2 relative ${isEffectivelyMuted ? 'opacity-50' : ''}`}>
       {/* Channel number */}
       <span className="font-semibold text-sm w-5 text-center shrink-0">{channel.channelNumber}</span>
       
@@ -395,6 +401,19 @@ function ChannelStrip({
           Q
         </span>
       )}
+
+      {/* Solo button */}
+      <button
+        onClick={onSoloToggle}
+        className={`px-1.5 py-0.5 rounded text-xs font-bold transition-colors shrink-0 ${
+          isSoloed
+            ? 'bg-yellow-500 text-yellow-900 hover:bg-yellow-400'
+            : 'bg-slate-700 text-slate-400 hover:bg-slate-600 hover:text-slate-300'
+        }`}
+        title={isSoloed ? 'Unsolo channel' : 'Solo channel'}
+      >
+        S
+      </button>
 
       {/* Audio controls dropdown */}
       <SimpleDropdown
@@ -824,16 +843,19 @@ function MultiChannelPlayer({
     return initial
   })
   const [mutedChannels, setMutedChannels] = useState<Set<number>>(new Set())
+  const [soloedChannels, setSoloedChannels] = useState<Set<number>>(new Set())
   
-  // Refs to track current volume/mute state for use in async callbacks
+  // Refs to track current volume/mute/solo state for use in async callbacks
   const volumesRef = useRef(volumes)
   const mutedChannelsRef = useRef(mutedChannels)
+  const soloedChannelsRef = useRef(soloedChannels)
   
   // Keep refs in sync with state
   useEffect(() => {
     volumesRef.current = volumes
     mutedChannelsRef.current = mutedChannels
-  }, [volumes, mutedChannels])
+    soloedChannelsRef.current = soloedChannels
+  }, [volumes, mutedChannels, soloedChannels])
 
   // Annotations state
   const [userAnnotations, setUserAnnotations] = useState<ApiAnnotation[]>([])
@@ -1079,14 +1101,19 @@ function MultiChannelPlayer({
 
   // Apply volume changes via Web Audio API gain nodes
   // Also re-apply when channels finish loading (gain nodes are created then)
+  // Respects solo state: if any channel is soloed, only soloed channels are audible
   useEffect(() => {
+    const hasSoloedChannels = soloedChannels.size > 0
     gainNodesRef.current.forEach((gainNode, channelNum) => {
       const volume = volumes.get(channelNum) ?? 1
       const isMuted = mutedChannels.has(channelNum)
-      const newValue = isMuted ? 0 : volume
+      const isSoloed = soloedChannels.has(channelNum)
+      // Channel is effectively muted if: explicitly muted, OR (solo mode is active AND this channel isn't soloed)
+      const isEffectivelyMuted = isMuted || (hasSoloedChannels && !isSoloed)
+      const newValue = isEffectivelyMuted ? 0 : volume
       gainNode.gain.setValueAtTime(newValue, gainNode.context.currentTime)
     })
-  }, [volumes, mutedChannels, loadedChannels])
+  }, [volumes, mutedChannels, soloedChannels, loadedChannels])
 
   // Expose seekAndPlay function via ref
   useEffect(() => {
@@ -1365,6 +1392,19 @@ function MultiChannelPlayer({
     })
     const currentVolume = volumes.get(channelNumber) ?? 1
     saveChannelSetting(channelNumber, currentVolume, willBeMuted)
+  }
+
+  // Solo toggle handler
+  const handleSoloToggle = (channelNumber: number) => {
+    setSoloedChannels(prev => {
+      const next = new Set(prev)
+      if (next.has(channelNumber)) {
+        next.delete(channelNumber)
+      } else {
+        next.add(channelNumber)
+      }
+      return next
+    })
   }
 
   // Create annotation at current time
@@ -1708,25 +1748,33 @@ function MultiChannelPlayer({
 
         {/* Channel Strips */}
         <div className="flex flex-col gap-1 relative">
-          {channels.map((channel) => (
-            <ChannelStrip
-              key={channel.channelNumber}
-              channel={channel}
-              volume={volumes.get(channel.channelNumber) ?? 1}
-              isMuted={mutedChannels.has(channel.channelNumber)}
-              onVolumeChange={(vol) => handleVolumeChange(channel.channelNumber, vol)}
-              onMuteToggle={() => handleMuteToggle(channel.channelNumber)}
-              isRegenerating={regeneratingChannels.has(channel.channelNumber)}
-              isRegeneratingPeaks={regeneratingPeaksChannels.has(channel.channelNumber)}
-              onRegenerate={() => onRegenerateChannelMp3(channel.channelNumber)}
-              onRegeneratePeaks={() => onRegenerateChannelPeaks(channel.channelNumber)}
-              waveformRef={handleWaveformRef(channel.channelNumber, channel)}
-              isLoaded={loadedChannels.has(channel.channelNumber)}
-              error={channelErrors.get(channel.channelNumber) || null}
-              onSeek={handleWaveformSeek}
-              duration={duration}
-            />
-          ))}
+          {channels.map((channel) => {
+            const isSoloed = soloedChannels.has(channel.channelNumber)
+            const hasSoloedChannels = soloedChannels.size > 0
+            const isEffectivelyMuted = hasSoloedChannels && !isSoloed
+            return (
+              <ChannelStrip
+                key={channel.channelNumber}
+                channel={channel}
+                volume={volumes.get(channel.channelNumber) ?? 1}
+                isMuted={mutedChannels.has(channel.channelNumber)}
+                isSoloed={isSoloed}
+                isEffectivelyMuted={isEffectivelyMuted}
+                onVolumeChange={(vol) => handleVolumeChange(channel.channelNumber, vol)}
+                onMuteToggle={() => handleMuteToggle(channel.channelNumber)}
+                onSoloToggle={() => handleSoloToggle(channel.channelNumber)}
+                isRegenerating={regeneratingChannels.has(channel.channelNumber)}
+                isRegeneratingPeaks={regeneratingPeaksChannels.has(channel.channelNumber)}
+                onRegenerate={() => onRegenerateChannelMp3(channel.channelNumber)}
+                onRegeneratePeaks={() => onRegenerateChannelPeaks(channel.channelNumber)}
+                waveformRef={handleWaveformRef(channel.channelNumber, channel)}
+                isLoaded={loadedChannels.has(channel.channelNumber)}
+                error={channelErrors.get(channel.channelNumber) || null}
+                onSeek={handleWaveformSeek}
+                duration={duration}
+              />
+            )
+          })}
         </div>
       </div>
 
