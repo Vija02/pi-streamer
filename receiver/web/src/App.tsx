@@ -734,6 +734,9 @@ function TimelineMarkers({
       {/* Spacer for channel number */}
       <span className="w-5 shrink-0" />
       
+      {/* Spacer for solo button (matches S button) */}
+      <span className="w-[22px] shrink-0" />
+      
       {/* Spacer for audio controls button (matches the button width) */}
       <span className="w-[30px] shrink-0" />
       
@@ -1734,6 +1737,8 @@ function MultiChannelPlayer({
             <div className="absolute inset-0 pointer-events-none z-10 flex items-stretch gap-2 px-2">
               {/* Spacer for channel number */}
               <span className="w-5 shrink-0" />
+              {/* Spacer for solo button */}
+              <span className="w-[22px] shrink-0" />
               {/* Spacer for audio controls */}
               <span className="w-[30px] shrink-0" />
               {/* Markers container - matches waveform area */}
