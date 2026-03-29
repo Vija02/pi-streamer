@@ -302,6 +302,9 @@ function SessionsList({
                     {formatShortDate(session.created_at)}
                     {session.totalDurationSeconds !== null && ` | Duration: ${formatDuration(session.totalDurationSeconds)}`}
                   </span>
+                  {session.status === 'processing' && (
+                    <span>{session.processedChannelCount}/{session.channels} channels processed</span>
+                  )}
                   {session.status === 'processed' && (
                     <span>
                       {session.activeChannelCount > 0 
@@ -1930,7 +1933,20 @@ function SessionDetail({
 
       {session.status === 'processing' && (
         <div className="bg-violet-600 text-white px-4 py-3 rounded-md mb-6">
-          Processing audio... This may take a few minutes.
+          <div className="flex items-center justify-between">
+            <span>Processing audio... This may take a few minutes.</span>
+            <span className="font-mono text-sm">
+              {session.processedChannelCount}/{session.channels} channels
+            </span>
+          </div>
+          {session.channels > 0 && (
+            <div className="mt-2 bg-violet-800 rounded-full h-2 overflow-hidden">
+              <div 
+                className="bg-white h-full transition-all duration-500"
+                style={{ width: `${(session.processedChannelCount / session.channels) * 100}%` }}
+              />
+            </div>
+          )}
         </div>
       )}
 
