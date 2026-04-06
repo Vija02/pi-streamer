@@ -14,6 +14,8 @@
  *   SAMPLE_RATE - Sample rate (default: 48000)
  *   CHANNELS - Number of channels (default: 18)
  *   RECORDING_DIR - Base recordings directory (default: ./recordings)
+ *   UPLOAD_RETRY_COUNT - Number of upload attempts per file (default: 3)
+ *   UPLOAD_RETRY_DELAY - Delay between retries in ms (default: 5000)
  */
 
 import { join, basename, isAbsolute } from "path";
@@ -30,6 +32,8 @@ const config = {
   sampleRate: Number(process.env.SAMPLE_RATE) || 48000,
   channels: Number(process.env.CHANNELS) || 18,
   recordingDir: process.env.RECORDING_DIR || "./recordings",
+  uploadRetryCount: Number(process.env.UPLOAD_RETRY_COUNT) || 3,
+  uploadRetryDelay: Number(process.env.UPLOAD_RETRY_DELAY) || 5000,
 };
 
 /**
@@ -179,16 +183,35 @@ async function uploadFolder(folderArg: string): Promise<void> {
 
   for (const filePath of files) {
     const fileName = basename(filePath);
-    process.stdout.write(`  Uploading ${fileName}... `);
+    let result: UploadResult | null = null;
 
-    const result = await uploadFile(filePath, sessionId);
-    results.push(result);
+    for (let attempt = 1; attempt <= config.uploadRetryCount; attempt++) {
+      if (attempt === 1) {
+        process.stdout.write(`  Uploading ${fileName}... `);
+      } else {
+        process.stdout.write(`  Retrying ${fileName} (attempt ${attempt}/${config.uploadRetryCount})... `);
+      }
 
-    if (result.success) {
-      console.log("OK");
+      result = await uploadFile(filePath, sessionId);
+
+      if (result.success) {
+        console.log("OK");
+        break;
+      }
+
+      console.log(`FAILED: ${result.error}`);
+
+      if (attempt < config.uploadRetryCount) {
+        const delaySec = (config.uploadRetryDelay / 1000).toFixed(1);
+        console.log(`    Waiting ${delaySec}s before retry...`);
+        await Bun.sleep(config.uploadRetryDelay);
+      }
+    }
+
+    results.push(result!);
+    if (result!.success) {
       successCount++;
     } else {
-      console.log(`FAILED: ${result.error}`);
       failCount++;
     }
   }
@@ -199,7 +222,7 @@ async function uploadFolder(folderArg: string): Promise<void> {
   console.log(`  Failed: ${failCount}/${files.length}`);
 
   if (failCount > 0) {
-    console.log(`\nFailed files:`);
+    console.log(`\nFailed files (after ${config.uploadRetryCount} attempts):`);
     for (const result of results) {
       if (!result.success) {
         console.log(`  - ${result.file}: ${result.error}`);
@@ -263,10 +286,12 @@ Examples:
   bun run scripts/upload-folder.ts /absolute/path/to/session
 
 Environment Variables:
-  STREAM_URL      Receiver endpoint (default: http://localhost:3000/stream)
-  SAMPLE_RATE     Audio sample rate (default: 48000)
-  CHANNELS        Number of channels (default: 18)
-  RECORDING_DIR   Base recordings directory (default: ./recordings)
+  STREAM_URL           Receiver endpoint (default: http://localhost:3000/stream)
+  SAMPLE_RATE          Audio sample rate (default: 48000)
+  CHANNELS             Number of channels (default: 18)
+  RECORDING_DIR        Base recordings directory (default: ./recordings)
+  UPLOAD_RETRY_COUNT   Number of upload attempts per file (default: 3)
+  UPLOAD_RETRY_DELAY   Delay between retries in ms (default: 5000)
 
 This script uploads all FLAC files from a recording session to the receiver.
 Use it to retry failed uploads or to manually upload a session.
