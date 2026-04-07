@@ -21,6 +21,7 @@ interface Session {
   totalProcessedSize: number
   totalDurationSeconds: number | null
   activeChannelCount: number
+  recordingTitle: string | null
 }
 
 interface Channel {
@@ -233,7 +234,7 @@ function SessionsList({
                   className={`flex flex-col items-center justify-center p-2 cursor-pointer border-b border-slate-700 transition-colors hover:bg-slate-700 no-underline ${
                     selectedSessionId === session.id ? 'bg-blue-500' : ''
                   }`}
-                  title={formatSessionTitle(session.created_at)}
+                  title={session.recordingTitle || formatSessionTitle(session.created_at)}
                 >
                   <span className={`w-3 h-3 rounded-full ${statusColors[session.status]}`} />
                   <span className={`text-[10px] mt-1 ${selectedSessionId === session.id ? 'text-white' : 'text-slate-400'}`}>
@@ -289,7 +290,7 @@ function SessionsList({
               >
                 <div className="flex justify-between items-center mb-1">
                   <span className="font-medium text-sm overflow-hidden text-ellipsis whitespace-nowrap flex-1 mr-2">
-                    {formatSessionTitle(session.created_at)}
+                    {session.recordingTitle || formatSessionTitle(session.created_at)}
                   </span>
                   <StatusBadge status={session.status} />
                 </div>
@@ -1810,6 +1811,7 @@ function SessionDetail({
   onRegenerateChannelMp3,
   onRegenerateChannelPeaks,
   onDeleteSession,
+  onTitleUpdate,
   isLoading,
   isRegeneratingHlsPeaks,
   isRegeneratingAllMp3s,
@@ -1826,6 +1828,7 @@ function SessionDetail({
   onRegenerateChannelMp3: (channelNumber: number) => void
   onRegenerateChannelPeaks: (channelNumber: number) => void
   onDeleteSession: () => void
+  onTitleUpdate: (title: string) => Promise<void>
   isLoading: boolean
   isRegeneratingHlsPeaks: boolean
   isRegeneratingAllMp3s: boolean
@@ -1839,6 +1842,10 @@ function SessionDetail({
   const [showChaptersPanel, setShowChaptersPanel] = useState(false)
   const [chapters, setChapters] = useState<ApiAnnotation[]>([])
   const playerRef = useRef<MultiChannelPlayerRef | null>(null)
+  const [isEditingTitle, setIsEditingTitle] = useState(false)
+  const [editTitle, setEditTitle] = useState(session.recordingTitle || '')
+  const [isSavingTitle, setIsSavingTitle] = useState(false)
+  const titleInputRef = useRef<HTMLInputElement | null>(null)
 
   // Fetch chapters/annotations
   const fetchChapters = async () => {
@@ -1885,7 +1892,71 @@ function SessionDetail({
       </Link>
 
       <div className="flex flex-wrap items-center gap-4 mb-6">
-        <h2 className="text-xl sm:text-2xl font-semibold break-all">{formatSessionTitle(session.created_at)}</h2>
+        <div className="flex-1 min-w-0">
+          {isEditingTitle ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                const trimmed = editTitle.trim()
+                setIsSavingTitle(true)
+                onTitleUpdate(trimmed).then(() => {
+                  setIsEditingTitle(false)
+                  setIsSavingTitle(false)
+                }).catch(() => {
+                  setIsSavingTitle(false)
+                })
+              }}
+              className="flex items-center gap-2"
+            >
+              <input
+                ref={titleInputRef}
+                type="text"
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                onBlur={() => {
+                  const trimmed = editTitle.trim()
+                  setIsSavingTitle(true)
+                  onTitleUpdate(trimmed).then(() => {
+                    setIsEditingTitle(false)
+                    setIsSavingTitle(false)
+                  }).catch(() => {
+                    setIsSavingTitle(false)
+                  })
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    setEditTitle(session.recordingTitle || '')
+                    setIsEditingTitle(false)
+                  }
+                }}
+                disabled={isSavingTitle}
+                placeholder="Enter a title..."
+                className="bg-slate-700 text-white text-xl sm:text-2xl font-semibold border border-slate-500 rounded px-2 py-1 w-full focus:outline-none focus:border-blue-500 placeholder:text-slate-500"
+                autoFocus
+              />
+            </form>
+          ) : (
+            <button
+              onClick={() => {
+                setEditTitle(session.recordingTitle || '')
+                setIsEditingTitle(true)
+                setTimeout(() => titleInputRef.current?.focus(), 0)
+              }}
+              className="bg-transparent border-none p-0 cursor-pointer text-left w-full group"
+              title="Click to edit title"
+            >
+              <h2 className="text-xl sm:text-2xl font-semibold break-all group-hover:text-blue-400 transition-colors">
+                {session.recordingTitle || formatSessionTitle(session.created_at)}
+              </h2>
+              {!session.recordingTitle && (
+                <span className="text-xs text-slate-500 group-hover:text-slate-400">Click to add a title</span>
+              )}
+              {session.recordingTitle && (
+                <span className="text-xs text-slate-500">{formatSessionTitle(session.created_at)}</span>
+              )}
+            </button>
+          )}
+        </div>
         <StatusBadge status={session.status} />
       </div>
 
@@ -2385,6 +2456,22 @@ function SessionPage({
     }
   }
 
+  // Update recording title
+  const updateTitle = async (title: string) => {
+    if (!sessionId) return
+    try {
+      await fetch(`${API_BASE}/api/sessions/${sessionId}/recording`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: title || null }),
+      })
+      // Refresh sessions list to update sidebar
+      fetchSessions()
+    } catch (err) {
+      console.error('Failed to update title:', err)
+    }
+  }
+
   useEffect(() => {
     if (sessionId) {
       fetchChannels(sessionId)
@@ -2418,6 +2505,7 @@ function SessionPage({
       onRegenerateChannelMp3={regenerateChannelMp3}
       onRegenerateChannelPeaks={regenerateChannelPeaks}
       onDeleteSession={deleteSession}
+      onTitleUpdate={updateTitle}
       isLoading={isLoading}
       isRegeneratingHlsPeaks={isRegeneratingHlsPeaks}
       isRegeneratingAllMp3s={isRegeneratingAllMp3s}

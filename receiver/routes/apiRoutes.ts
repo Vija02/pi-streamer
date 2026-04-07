@@ -13,6 +13,7 @@ import {
   parseTags,
   parseMetadata,
 } from "../db/recordings";
+import { getDatabase } from "../db/connection";
 
 const app = new Hono();
 
@@ -23,11 +24,23 @@ app.get("/sessions", async (c) => {
   try {
     const sessions = getAllSessions();
 
+    // Fetch all recording titles in one query
+    const db = getDatabase();
+    const recordingTitles = db
+      .query<{ session_id: string; title: string | null }, []>(
+        "SELECT session_id, title FROM recordings"
+      )
+      .all();
+    const titleMap = new Map(
+      recordingTitles.map((r) => [r.session_id, r.title])
+    );
+
     const sessionsWithStats = sessions.map((session) => {
       const stats = getSessionStats(session.id);
       return {
         ...session,
         ...stats,
+        recordingTitle: titleMap.get(session.id) ?? null,
       };
     });
 
