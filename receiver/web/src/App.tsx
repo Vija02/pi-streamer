@@ -896,6 +896,8 @@ function MultiChannelPlayer({
   
   // Web Audio API for volume boost beyond 100%
   const audioContextRef = useRef<AudioContext | null>(null)
+  const masterGainRef = useRef<GainNode | null>(null)
+  const compressorRef = useRef<DynamicsCompressorNode | null>(null)
   const gainNodesRef = useRef<Map<number, GainNode>>(new Map())
   const sourceNodesRef = useRef<Map<number, MediaElementAudioSourceNode>>(new Map())
 
@@ -994,6 +996,25 @@ function MultiChannelPlayer({
       // Setup Web Audio API for volume boost
       if (!audioContextRef.current) {
         audioContextRef.current = new AudioContext()
+        
+        // Create master output chain: masterGain -> compressor -> destination
+        // The compressor acts as a limiter to prevent clipping when many channels sum together
+        const ctx = audioContextRef.current
+        
+        const masterGain = ctx.createGain()
+        masterGain.gain.value = 1.0
+        masterGainRef.current = masterGain
+        
+        const compressor = ctx.createDynamicsCompressor()
+        compressor.threshold.value = -6   // Start compressing at -6dB
+        compressor.knee.value = 6         // Soft knee for smooth compression
+        compressor.ratio.value = 12       // Heavy ratio acts as a limiter
+        compressor.attack.value = 0.003   // Fast attack to catch peaks
+        compressor.release.value = 0.1    // Quick release for natural sound
+        compressorRef.current = compressor
+        
+        masterGain.connect(compressor)
+        compressor.connect(ctx.destination)
       }
       const audioContext = audioContextRef.current
       
@@ -1009,9 +1030,9 @@ function MultiChannelPlayer({
       gainNode.gain.value = isMuted ? 0 : currentVolume
       gainNodesRef.current.set(channel.channelNumber, gainNode)
       
-      // Connect: source -> gain -> destination
+      // Connect: source -> gain -> masterGain -> compressor -> destination
       sourceNode.connect(gainNode)
-      gainNode.connect(audioContext.destination)
+      gainNode.connect(masterGainRef.current!)
 
       // Create WaveSurfer - interact disabled, we handle click-to-seek manually
       const ws = WaveSurfer.create({
@@ -1126,6 +1147,8 @@ function MultiChannelPlayer({
       audioRefs.current.forEach(audio => audio.pause())
       sourceNodesRef.current.forEach(source => source.disconnect())
       gainNodesRef.current.forEach(gain => gain.disconnect())
+      if (masterGainRef.current) masterGainRef.current.disconnect()
+      if (compressorRef.current) compressorRef.current.disconnect()
       if (audioContextRef.current) {
         audioContextRef.current.close()
       }
@@ -1134,6 +1157,8 @@ function MultiChannelPlayer({
       audioRefs.current.clear()
       sourceNodesRef.current.clear()
       gainNodesRef.current.clear()
+      masterGainRef.current = null
+      compressorRef.current = null
       
       // Clear any pending save timeout
       if (settingsSaveTimeoutRef.current) {
