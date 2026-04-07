@@ -32,6 +32,7 @@ app.get("/sessions/:id/channel-settings", async (c) => {
       channelNumber: s.channel_number,
       volume: s.volume,
       isMuted: s.is_muted === 1,
+      label: s.label,
     })),
   });
 });
@@ -58,6 +59,7 @@ app.patch("/sessions/:id/channel-settings/:channelNumber", async (c) => {
     const updated = updateChannelSetting(sessionId, channelNumber, {
       volume: body.volume,
       isMuted: body.isMuted,
+      label: body.label,
     });
 
     return c.json({
@@ -66,6 +68,7 @@ app.patch("/sessions/:id/channel-settings/:channelNumber", async (c) => {
         channelNumber: updated.channel_number,
         volume: updated.volume,
         isMuted: updated.is_muted === 1,
+        label: updated.label,
       },
     });
   } catch (error) {
@@ -94,10 +97,11 @@ app.put("/sessions/:id/channel-settings", async (c) => {
 
     const updated = bulkUpdateChannelSettings(
       sessionId,
-      body.settings.map((s: { channelNumber: number; volume?: number; isMuted?: boolean }) => ({
+      body.settings.map((s: { channelNumber: number; volume?: number; isMuted?: boolean; label?: string | null }) => ({
         channelNumber: s.channelNumber,
         volume: s.volume,
         isMuted: s.isMuted,
+        label: s.label,
       }))
     );
 
@@ -107,6 +111,7 @@ app.put("/sessions/:id/channel-settings", async (c) => {
         channelNumber: s.channel_number,
         volume: s.volume,
         isMuted: s.is_muted === 1,
+        label: s.label,
       })),
     });
   } catch (error) {

@@ -67,6 +67,7 @@ export function updateChannelSetting(
   updates: {
     volume?: number;
     isMuted?: boolean;
+    label?: string | null;
   }
 ): ChannelSetting {
   const db = getDatabase();
@@ -76,7 +77,7 @@ export function updateChannelSetting(
   getOrCreateChannelSetting(sessionId, channelNumber);
 
   const fields: string[] = ["updated_at = ?"];
-  const values: (string | number)[] = [now];
+  const values: (string | number | null)[] = [now];
 
   if (updates.volume !== undefined) {
     fields.push("volume = ?");
@@ -85,6 +86,10 @@ export function updateChannelSetting(
   if (updates.isMuted !== undefined) {
     fields.push("is_muted = ?");
     values.push(updates.isMuted ? 1 : 0);
+  }
+  if (updates.label !== undefined) {
+    fields.push("label = ?");
+    values.push(updates.label);
   }
 
   values.push(sessionId, channelNumber);
@@ -106,12 +111,14 @@ export function bulkUpdateChannelSettings(
     channelNumber: number;
     volume?: number;
     isMuted?: boolean;
+    label?: string | null;
   }>
 ): ChannelSetting[] {
   for (const setting of settings) {
     updateChannelSetting(sessionId, setting.channelNumber, {
       volume: setting.volume,
       isMuted: setting.isMuted,
+      label: setting.label,
     });
   }
   return getChannelSettingsBySession(sessionId);
@@ -133,14 +140,15 @@ export function deleteChannelSettingsBySession(sessionId: string): number {
  */
 export function getChannelSettingsMap(
   sessionId: string
-): Map<number, { volume: number; isMuted: boolean }> {
+): Map<number, { volume: number; isMuted: boolean; label: string | null }> {
   const settings = getChannelSettingsBySession(sessionId);
-  const map = new Map<number, { volume: number; isMuted: boolean }>();
+  const map = new Map<number, { volume: number; isMuted: boolean; label: string | null }>();
 
   for (const setting of settings) {
     map.set(setting.channel_number, {
       volume: setting.volume,
       isMuted: setting.is_muted === 1,
+      label: setting.label,
     });
   }
 

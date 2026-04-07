@@ -344,6 +344,8 @@ function ChannelStrip({
   onSeek,
   duration,
   isAdmin,
+  label,
+  onLabelChange,
 }: { 
   channel: Channel
   volume: number
@@ -363,10 +365,15 @@ function ChannelStrip({
   onSeek: (time: number) => void
   duration: number
   isAdmin: boolean
+  label: string
+  onLabelChange: (label: string) => void
 }) {
   const [isEditingVolume, setIsEditingVolume] = useState(false)
   const [editValue, setEditValue] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const [isEditingLabel, setIsEditingLabel] = useState(false)
+  const [editLabelValue, setEditLabelValue] = useState(label)
+  const labelInputRef = useRef<HTMLInputElement>(null)
 
   const handleDoubleClick = () => {
     setEditValue(Math.round(volume * 100).toString())
@@ -398,8 +405,51 @@ function ChannelStrip({
 
   return (
     <div className={`bg-slate-800 rounded-lg flex items-center gap-2 p-2 relative ${isEffectivelyMuted ? 'opacity-50' : ''}`}>
-      {/* Channel number */}
-      <span className="font-semibold text-sm w-5 text-center shrink-0">{channel.channelNumber}</span>
+      {/* Channel number + label */}
+      <div className="shrink-0 flex flex-col items-center w-5">
+        <span className="font-semibold text-sm text-center leading-none">{channel.channelNumber}</span>
+        {isEditingLabel ? (
+          <input
+            ref={labelInputRef}
+            type="text"
+            value={editLabelValue}
+            onChange={(e) => setEditLabelValue(e.target.value)}
+            onBlur={() => {
+              const trimmed = editLabelValue.trim()
+              onLabelChange(trimmed)
+              setIsEditingLabel(false)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                const trimmed = editLabelValue.trim()
+                onLabelChange(trimmed)
+                setIsEditingLabel(false)
+              } else if (e.key === 'Escape') {
+                setEditLabelValue(label)
+                setIsEditingLabel(false)
+              }
+            }}
+            placeholder="..."
+            maxLength={8}
+            className="bg-slate-700 text-slate-300 text-[9px] border border-slate-500 rounded px-0.5 py-0 w-10 text-center focus:outline-none focus:border-blue-500 placeholder:text-slate-600 -mx-2.5"
+            autoFocus
+          />
+        ) : (
+          <button
+            onClick={() => {
+              setEditLabelValue(label)
+              setIsEditingLabel(true)
+              setTimeout(() => labelInputRef.current?.focus(), 0)
+            }}
+            className="bg-transparent border-none p-0 cursor-pointer leading-none"
+            title={label || 'Click to add label'}
+          >
+            <span className={`text-[9px] truncate block max-w-[2.5rem] ${label ? 'text-slate-400' : 'text-slate-600 hover:text-slate-500'}`}>
+              {label || '...'}
+            </span>
+          </button>
+        )}
+      </div>
       
       {/* Quiet indicator */}
       {channel.isQuiet && (
@@ -627,6 +677,7 @@ interface ApiChannelSetting {
   channelNumber: number
   volume: number
   isMuted: boolean
+  label: string | null
 }
 
 // Generate clock time markers for round times (every 30 minutes)
@@ -861,6 +912,7 @@ function MultiChannelPlayer({
   })
   const [mutedChannels, setMutedChannels] = useState<Set<number>>(new Set())
   const [soloedChannels, setSoloedChannels] = useState<Set<number>>(new Set())
+  const [channelLabels, setChannelLabels] = useState<Map<number, string>>(new Map())
   
   // Refs to track current volume/mute/solo state for use in async callbacks
   const volumesRef = useRef(volumes)
@@ -1030,6 +1082,7 @@ function MultiChannelPlayer({
           // Apply loaded settings
           const newVolumes = new Map<number, number>()
           const newMuted = new Set<number>()
+          const newLabels = new Map<number, string>()
           
           // Start with defaults
           channels.forEach(ch => newVolumes.set(ch.channelNumber, 1))
@@ -1038,6 +1091,7 @@ function MultiChannelPlayer({
           settings.forEach(s => {
             newVolumes.set(s.channelNumber, s.volume)
             if (s.isMuted) newMuted.add(s.channelNumber)
+            if (s.label) newLabels.set(s.channelNumber, s.label)
           })
           
           // Update refs immediately (before state update triggers re-render)
@@ -1053,6 +1107,7 @@ function MultiChannelPlayer({
           
           setVolumes(newVolumes)
           setMutedChannels(newMuted)
+          setChannelLabels(newLabels)
         }
       } catch (err) {
         console.error('Failed to load channel settings:', err)
@@ -1376,6 +1431,33 @@ function MultiChannelPlayer({
         console.error('Failed to save channel setting:', err)
       }
     }, 500)
+  }
+
+  // Save channel label to server
+  const saveChannelLabel = async (channelNumber: number, label: string) => {
+    try {
+      await fetch(`${API_BASE}/api/sessions/${sessionId}/channel-settings/${channelNumber}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: label || null }),
+      })
+    } catch (err) {
+      console.error('Failed to save channel label:', err)
+    }
+  }
+
+  // Channel label change handler
+  const handleLabelChange = (channelNumber: number, label: string) => {
+    setChannelLabels(prev => {
+      const next = new Map(prev)
+      if (label) {
+        next.set(channelNumber, label)
+      } else {
+        next.delete(channelNumber)
+      }
+      return next
+    })
+    saveChannelLabel(channelNumber, label)
   }
 
   // Volume change handler
@@ -1792,6 +1874,8 @@ function MultiChannelPlayer({
                 onSeek={handleWaveformSeek}
                 duration={duration}
                 isAdmin={isAdmin}
+                label={channelLabels.get(channel.channelNumber) || ''}
+                onLabelChange={(label) => handleLabelChange(channel.channelNumber, label)}
               />
             )
           })}

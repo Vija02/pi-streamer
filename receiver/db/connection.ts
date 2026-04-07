@@ -209,6 +209,9 @@ function runMigrations(db: Database): void {
   tryAddColumn(db, "processed_channels", "peaks_url", "TEXT");
   tryAddColumn(db, "processed_channels", "is_quiet", "INTEGER DEFAULT 0");
   tryAddColumn(db, "processed_channels", "is_silent", "INTEGER DEFAULT 0");
+
+  // channel_settings migrations
+  tryAddColumn(db, "channel_settings", "label", "TEXT");
 }
 
 function tryAddColumn(

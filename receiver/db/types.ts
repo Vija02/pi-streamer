@@ -149,6 +149,7 @@ export interface ChannelSetting {
   channel_number: number;
   volume: number;
   is_muted: number; // 0 = false, 1 = true (SQLite boolean)
+  label: string | null;
   created_at: string;
   updated_at: string;
 }
