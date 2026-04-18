@@ -102,8 +102,9 @@ function buildJackCaptureArgs(sessionDir: string, config: Config): string[] {
 	// Calculate rotation interval in audio frames
 	const rotateFrames = segmentDuration * sampleRate
 
-	// Filename prefix - jack_capture will add _001, _002, etc.
-	const filenamePrefix = join(sessionDir, "jack_capture")
+	// Filename prefix - includes detected console name, jack_capture will add _001, _002, etc.
+	const consoleName = config.detectedConsole || "capture"
+	const filenamePrefix = join(sessionDir, `${consoleName}_capture`)
 
 	const args = [
 		"-f", "wav",           // Output format (WAV - will be compressed to FLAC after recording)

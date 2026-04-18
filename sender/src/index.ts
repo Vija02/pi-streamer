@@ -1,9 +1,13 @@
 /**
- * XR18 JACK Audio Sender Service
+ * Behringer Mixer JACK Audio Sender Service
  *
- * A recording service that captures 18 channels from XR18 via JACK using jack_capture.
- * 
+ * A recording service that captures 18 channels from Behringer X-series mixers
+ * (XR18, X18, XR16, XR12, X32, etc.) via JACK using jack_capture.
+ *
+ * Auto-detects connected mixer consoles - no manual ALSA/JACK configuration needed.
+ *
  * Features:
+ * - Auto-detects Behringer mixer ALSA device and JACK port prefix
  * - Records locally as segments (primary - always works)
  * - Uploads completed segments to server in background
  * - Graceful shutdown via SIGINT, SIGTERM, or finish trigger file
@@ -15,7 +19,7 @@
  * - If recorder shuts off, you only lose the current segment
  *
  * Requirements:
- * - JACK audio server running with XR18 connected
+ * - Behringer mixer connected via USB
  * - jack_capture installed (supports unlimited channels, unlike FFmpeg's 8-channel limit)
  *
  * To stop gracefully, either:
@@ -27,7 +31,7 @@ import { logger } from "./logger";
 import { getConfig } from "./config";
 import { commandExists } from "./utils";
 import { startRecording } from "./recorder";
-import { checkJackSetup, getCapturePorts } from "./jack";
+import { checkJackSetup, getCapturePorts, getDetectedConsoleName, detectAlsaDevice } from "./jack";
 import { uploadPending } from "./upload";
 import { startScheduler, stopScheduler, getSchedulerState } from "./scheduler";
 
@@ -61,18 +65,27 @@ async function testJack(): Promise<void> {
     process.exit(1);
   }
 
+  // Show ALSA detection results
+  const alsaDevice = await detectAlsaDevice();
+  if (alsaDevice) {
+    logger.info({ device: alsaDevice.device, cardName: alsaDevice.cardName }, "Detected mixer ALSA device");
+  } else {
+    logger.warn("No Behringer mixer detected in ALSA devices");
+  }
+
   const jackCheck = await checkJackSetup();
   if (!jackCheck.ok) {
-    logger.fatal("JACK server is not running. Start JACK first, e.g.: jackd -d alsa -d hw:XR18 -r 48000");
+    logger.fatal("JACK server is not running. Start JACK first, or set JACK_AUTO_START=true");
     process.exit(1);
   }
 
   const config = getConfig();
+  const detectedConsole = getDetectedConsoleName();
   const capturePorts = await getCapturePorts();
 
+  logger.info({ detectedConsole: detectedConsole || "none (using explicit config)" }, "Detected console");
   logger.info({ ports: capturePorts }, "Available JACK capture ports");
   logger.info({ prefix: config.jackPortPrefix }, "Current JACK_PORT_PREFIX");
-  logger.info("Set JACK_PORT_PREFIX environment variable to match your XR18 ports.");
   logger.info("Test complete.");
 }
 
@@ -168,7 +181,7 @@ Environment variables:
   RECORDING_DIR         - Local directory (default: ./recordings)
   SAMPLE_RATE           - Audio sample rate (default: 48000)
   CHANNELS              - Number of channels (default: 18)
-  JACK_PORT_PREFIX      - JACK port prefix (default: XR18 Multichannel:capture_AUX)
+  JACK_PORT_PREFIX      - JACK port prefix (default: auto-detect)
   SESSION_ID            - Session identifier (default: timestamp)
   SEGMENT_DURATION      - Segment length in seconds (default: 30)
   UPLOAD_ENABLED        - Enable server upload (default: true)
@@ -197,7 +210,7 @@ Each time slot creates a separate recording session with its own session ID.
 JACK auto-start settings:
   JACK_AUTO_START       - Auto-start JACK if not running (default: true)
   JACK_DRIVER           - JACK driver (default: alsa)
-  JACK_DEVICE           - JACK device (default: hw:XR18)
+  JACK_DEVICE           - JACK device (default: auto-detect)
   JACK_SAMPLE_RATE      - JACK sample rate (default: 48000)
   JACK_PERIOD_SIZE      - JACK period size (default: 2048)
   JACK_NPERIODS         - JACK number of periods (default: 3)
@@ -220,7 +233,7 @@ Laptop audio routing (send laptop output to XR18 input):
   }
 
   // Default: start recording service (immediate recording)
-  logger.info("XR18 Audio Sender Service starting...");
+  logger.info("Audio Sender Service starting (auto-detecting mixer)...");
 
   // Check dependencies
   const missing = await checkDependencies();

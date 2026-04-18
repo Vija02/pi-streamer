@@ -14,10 +14,13 @@ export interface Config {
   sampleRate: number;
   channels: number;
 
-  // JACK port prefix (adjust based on your JACK setup)
+  // JACK port prefix ("auto" for auto-detection, or explicit prefix)
   jackPortPrefix: string;
 
-  // Laptop audio routing to XR18
+  // Detected console name (set at runtime by auto-detection, e.g., "XR18", "X18XR18")
+  detectedConsole: string | null;
+
+  // Laptop audio routing to mixer
   laptopRouteEnabled: boolean;
   laptopCaptureLeft: string;
   laptopCaptureRight: string;
@@ -59,8 +62,11 @@ export function loadConfig(): Config {
     sampleRate: Number(process.env.SAMPLE_RATE) || 48000,
     channels: Number(process.env.CHANNELS) || 18,
 
-    // JACK port prefix
-    jackPortPrefix: process.env.JACK_PORT_PREFIX || "XR18 Multichannel:capture_AUX",
+    // JACK port prefix ("auto" = auto-detect from JACK ports)
+    jackPortPrefix: process.env.JACK_PORT_PREFIX || "auto",
+
+    // Detected console name (populated at runtime)
+    detectedConsole: null,
 
     // Laptop audio routing to XR18 (connects laptop output to XR18 input channel 10)
     laptopRouteEnabled: process.env.LAPTOP_ROUTE_ENABLED !== "false",
@@ -101,4 +107,18 @@ export function getConfig(): Config {
     configInstance = loadConfig();
   }
   return configInstance;
+}
+
+/**
+ * Update the detected console name and resolve auto port prefix.
+ * Called by jack.ts after auto-detection.
+ */
+export function updateDetectedConsole(consoleName: string): void {
+  const config = getConfig();
+  config.detectedConsole = consoleName;
+
+  // If port prefix is "auto", resolve it now
+  if (config.jackPortPrefix === "auto") {
+    config.jackPortPrefix = `${consoleName} Multichannel:capture_AUX`;
+  }
 }

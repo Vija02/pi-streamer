@@ -6,8 +6,8 @@
  * compressed and uploaded.
  *
  * Logic:
- * - jack_capture creates files like: jack_capture_001.wav, jack_capture_002.wav, etc.
- * - When jack_capture_002.wav appears, jack_capture_001.wav is complete
+ * - jack_capture creates files like: XR18_capture.00.wav, XR18_capture.01.wav, etc.
+ * - When XR18_capture.01.wav appears, XR18_capture.00.wav is complete
  * - We compress the WAV to FLAC (split into channel groups) and queue for upload
  * - On shutdown, we process the final (current) file
  */
@@ -45,11 +45,11 @@ const state: WatcherState = {
 const POLL_INTERVAL_MS = 5000
 
 /**
- * Extract segment number from jack_capture filename
- * e.g., "jack_capture.00.wav" -> 0, "jack_capture.01.wav" -> 1
+ * Extract segment number from capture filename
+ * e.g., "XR18_capture.00.wav" -> 0, "X18XR18_capture.01.wav" -> 1
  */
 function extractSegmentNumber(filename: string): number {
-	const match = filename.match(/jack_capture\.(\d+)\.wav$/)
+	const match = filename.match(/_capture\.(\d+)\.wav$/)
 	if (match) {
 		return parseInt(match[1], 10)
 	}
@@ -63,7 +63,7 @@ async function getWavFiles(dir: string): Promise<string[]> {
 	try {
 		const files = await readdir(dir)
 		return files
-			.filter((f) => f.endsWith(".wav") && f.startsWith("jack_capture."))
+			.filter((f) => f.endsWith(".wav") && f.includes("_capture."))
 			.sort((a, b) => extractSegmentNumber(a) - extractSegmentNumber(b))
 	} catch {
 		return []
@@ -158,7 +158,7 @@ function handleFsEvent(eventType: string, filename: string | null): void {
 	if (!state.isRunning) return
 	if (!filename) return
 	if (!filename.endsWith(".wav")) return
-	if (!filename.startsWith("jack_capture.")) return
+	if (!filename.includes("_capture.")) return
 
 	logger.debug({ eventType, filename }, "File system event")
 
